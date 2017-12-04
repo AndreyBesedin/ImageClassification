@@ -17,7 +17,7 @@ opt = {
   exp_nb = 3,
   dropout = 0,
   training = 'fake',
-  testing = 'fake',
+  testing = 'real',
 }
 
 opt.manualSeed = torch.random(1, 10000) -- fix seed
@@ -59,7 +59,7 @@ local data_name = {
 
 local criterion = nn.ClassNLLCriterion()
 
-local nb_classes = 6
+local nb_classes = 10 
 for idx_exp = 1, #data_name do
   opt.exp_nb = idx_exp
   trainset, testset = load_dataset(data_name[opt.exp_nb])
