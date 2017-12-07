@@ -13,7 +13,7 @@ opt = {
   batchSize = 500,
   fineSize = 224,
   gpu = 1,
-  niter = 200,
+  niter = 3,
   exp_nb = 3,
   dropout = 0,
   training = 'fake',
@@ -34,7 +34,7 @@ local function getBatch(data, indices)
 end
 
 local function load_dataset(data_name)
-  local data_folder = '/home/besedin/workspace/Data/LSUN/lsun/single_file_t7/'
+  local data_folder = '/home/besedin/workspace/Data/LSUN/single_file_t7/'
   trainset = torch.load(data_folder .. opt.training .. '/' .. data_name  .. '_train.t7')            
   trainset.data = trainset.data:cuda(); trainset.labels = trainset.labels:cuda()
   opt.trainSize = trainset.labels:size(1)
@@ -127,6 +127,9 @@ for idx_exp = 1, #data_name do
   end
 
   C_model:training()
+
+  firstEpochAccuracies = torch.zeros(3*math.floor(opt.trainSize/opt.batchSize))
+  idx = 1
   for epoch = 1, opt.niter do
     local indices_rand = torch.randperm(opt.trainSize)
     confusion_train = optim.ConfusionMatrix(nb_classes)
@@ -140,6 +143,11 @@ for idx_exp = 1, #data_name do
       optim.adam(fx, p, config, optimState)
       C_model:clearState()
       p, gp = C_model:getParameters()
+      if epoch <=3 and i%10 == 0 then
+	local conf = test_model()
+	firstEpochAccuracies[idx] = conf.totalValid; idx = idx + 1	
+	print('First epochs accuracies: '); print(conf.totalValid)
+      end
     end
     confusion_train:updateValids()
     C_model:evaluate()
@@ -149,5 +157,6 @@ for idx_exp = 1, #data_name do
     C_model:training()
     print('Epoch: ' .. epoch .. ' out of ' .. opt.niter  .. '; Test performance: ' .. accuracies[2][epoch] .. '; Train performance: ' .. accuracies[1][epoch])
   end
-  torch.save('accuracies_' .. data_name[opt.exp_nb] .. '.t7', accuracies)
+  torch.save('first_epochs_' .. data_name[opt.exp_nb] .. '.t7', firstEpochAccuracies)
+--  torch.save('accuracies_' .. data_name[opt.exp_nb] .. '.t7', accuracies)
 end
