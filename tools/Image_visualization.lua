@@ -50,3 +50,20 @@ function generate_and_show(model_path, nb1, nb2)
   end
   image.display(res_to_show:float())
 end
+
+function generate_and_save(model, nb1, nb2)
+  local noise
+  if not noise_init then
+    noise = torch.CudaTensor(nb1 * nb2, 100, 1, 1):normal(0,1)
+  else
+    noise = noise_init
+  end
+  local res = model:forward(noise); nc = res:size(2); s1 = res:size(3); s2 = res:size(4)
+  local res_to_show = torch.CudaTensor(nc, s1*nb1, s2*nb2)
+  for idx1 = 1, nb1 do
+    for idx2 = 1, nb2 do
+      res_to_show[{{}, {1 + (idx1-1)*s1, idx1*s1}, {1 + (idx2-1)*s2, idx2*s2}}] = res[{{idx1 + nb1*(idx2-1)}, {}, {}, {}}]:squeeze()
+    end
+  end
+  image.save('10x10_images_grid.png', res_to_show:float())
+end
