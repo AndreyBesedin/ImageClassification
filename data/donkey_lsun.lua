@@ -90,7 +90,7 @@ trainLoader.db_reader = {}
 for i=1,#classes do
    print('initializing: ', classes[i])
    trainLoader.indices[i] = torch.load(paths.concat(trainPath, classes[i]
-                                                        .. '_train_lmdb_hashes_chartensor_50k-100k.t7'))
+                                                        .. '_train_lmdb_hashes_chartensor_50k.t7'))
    trainLoader.db[i] = lmdb.env{Path=paths.concat(trainPath, classes[i] .. '_train_lmdb'),
                                 RDONLY=true, NOLOCK=true, NOTLS=true, NOSYNC=true, NOMETASYNC=true,
                                MaxReaders=20, MaxDBs=20}

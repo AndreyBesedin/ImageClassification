@@ -2,7 +2,7 @@ require 'cunn'
 require 'cudnn'
 opt = {                                                                                                                                                  
    dataset = 'lsun',       -- imagenet / lsun / folder
-   batchSize = 64,
+   batchSize = 30,
    loadSize = 225,
    fineSize = 224,
    nThreads = 6,           -- #  of data loading threads to use
@@ -22,8 +22,14 @@ for idx_class = 1, #opt.data_classes_full do
     xlua.progress(idx_data, data:size())
     batch = data:getBatch()
     batch = batch:cuda()
-    res[{{idx_data, idx_data + opt.batchSize - 1},{}}] = feature_extractor:forward(batch)
+    if idx_data + opt.batchSize -1 <= data:size(1) then
+      res[{{idx_data, idx_data + opt.batchSize - 1},{}}] = feature_extractor:forward(batch)
+    else
+      batch = batch[{{1, data:size(1)-idx_data+1},{},{},{}}]
+      res[{{idx_data, data:size(1)},{}}] = feature_extractor:forward(batch)
+      print('Last index = ' .. idx_data)
+    end
   end
-  torch.save(opt.data_classes[1] .. '_50k_features.t7', res)
+  torch.save(opt.data_classes[1] .. '_50k_features.t7', res:float())
 end
 
