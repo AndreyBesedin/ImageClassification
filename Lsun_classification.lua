@@ -10,13 +10,13 @@ opt = {
   beta1 = 0.9,
   beta2 = 0.999,
   epsilon = 1e-8,
-  batchSize = 500,
+  batchSize = 200,
   fineSize = 224,
   gpu = 1,
   niter = 3,
   exp_nb = 3,
   dropout = 0,
-  training = 'fake',
+  training = 'real',
   testing = 'real',
 }
 
@@ -34,11 +34,12 @@ local function getBatch(data, indices)
 end
 
 local function load_dataset(data_name)
-  local data_folder = '/home/besedin/workspace/Data/LSUN/single_file_t7/'
-  trainset = torch.load(data_folder .. opt.training .. '/' .. data_name  .. '_train.t7')            
+--  local data_folder = '/home/besedin/workspace/Data/LSUN/single_file_t7/'
+  local data_folder = '/home/besedin/workspace/Projects/ImageClassification/subsets/full/'
+  trainset = torch.load(data_folder .. 'lsun_full_50k_per_class.t7')            
   trainset.data = trainset.data:cuda(); trainset.labels = trainset.labels:cuda()
   opt.trainSize = trainset.labels:size(1)
-  testset = torch.load(data_folder .. opt.testing .. '/' .. data_name  .. '_test.t7')
+  testset = torch.load(data_folder .. 'lsun_full_2_50k_per_class.t7')
   testset.data = testset.data:cuda(); testset.labels = testset.labels:cuda()
   opt.testSize = testset.labels:size(1)
   return trainset, testset
@@ -128,7 +129,7 @@ for idx_exp = 1, #data_name do
 
   C_model:training()
 
-  firstEpochAccuracies = torch.zeros(3*math.floor(opt.trainSize/opt.batchSize))
+  --firstEpochAccuracies = torch.zeros(3*math.floor(opt.trainSize/opt.batchSize))
   idx = 1
   for epoch = 1, opt.niter do
     local indices_rand = torch.randperm(opt.trainSize)
@@ -143,12 +144,15 @@ for idx_exp = 1, #data_name do
       optim.adam(fx, p, config, optimState)
       C_model:clearState()
       p, gp = C_model:getParameters()
-      if epoch <=3 and i%10 == 0 then
-	local conf = test_model()
-	firstEpochAccuracies[idx] = conf.totalValid; idx = idx + 1	
-	print('First epochs accuracies: '); print(conf.totalValid)
-      end
+      --if epoch <=3 and i%100 == 0 then
+	    --  local conf = test_model()
+	      --firstEpochAccuracies[idx] = conf.totalValid; idx = idx + 1	
+	    --  print('First epochs accuracies: '); print(conf.totalValid)
+      --end
     end
+    local conf = test_model()
+    print('test_accuracy: ')
+    print(conf)
     confusion_train:updateValids()
     C_model:evaluate()
     local conf = test_model()
