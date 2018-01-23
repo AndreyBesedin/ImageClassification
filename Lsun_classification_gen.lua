@@ -16,8 +16,8 @@ opt = {
   niter = 3,
   exp_nb = 3,
   dropout = 0,
-  training = 'real',
-  testing = 'real',
+  training = 'fake', -- options: 'real', 'fake'
+  testing = 'real',  -- options: 'real', 'fake'
 }
 
 opt.manualSeed = torch.random(1, 10000) -- fix seed
