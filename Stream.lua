@@ -1,11 +1,20 @@
--- run with DATA_ROOT=/home/besedin/workspace/Data/LSUN/ls
+-------------------------------------------------------------------------------------------------------
+-- DESCRIPTION
+-- should run with DATA_ROOT=/home/besedin/workspace/Data/LSUN/...
+-------------------------------------------------------------------------------------------------------
+
+-------------------------------------------------------------------------------------------------------
+-- LOADING PACKAGES
+-------------------------------------------------------------------------------------------------------
 require 'cunn'
 require 'cudnn'
 require 'image'
 require 'optim'
 require 'nngraph'
-
--- Advanced options for training
+dofile('./tools/tools.lua')
+-------------------------------------------------------------------------------------------------------
+-- ADVANCED OPTIONS FOR TRAINING
+-------------------------------------------------------------------------------------------------------
 opt = {
   lr = 0.001,
   initClassNb = 4, -- Number of already pretrained classes in the model
@@ -22,10 +31,20 @@ opt = {
   totalClasses = 10, -- Total nb of classes in stream, basically unknown but since we use static datasets as stream, let's say we know it... 
 }
 
+-- Full list of available classes
 local data_classes = {'bedroom', 'bridge', 'church_outdoor', 'classroom', 'conference_room', 
                       'dining_room', 'kitchen', 'living_room', 'restaurant', 'tower'}
+                      
+-------------------------------------------------------------------------------------------------------
+-- MODIFYING OPTIONS
+-------------------------------------------------------------------------------------------------------
+opt.nb_classes = #data_classes                      
 opt.full_data_classes = data_classes
 opt.manualSeed = torch.random(1, 10000) -- fix seed
+
+-------------------------------------------------------------------------------------------------------
+-- SETTING DEFAULT TORCH BEHAVIOR
+-------------------------------------------------------------------------------------------------------
 torch.manualSeed(opt.manualSeed)
 torch.setnumthreads(1)
 torch.setdefaulttensortype('torch.FloatTensor')
@@ -50,37 +69,42 @@ local function init_classifier_LSUN(inSize, nbClasses, opt)
   if opt.gpu == 1 then C = C:cuda() end
   return C
 end
-
 -- FEATURE EXTRACTOR FOR LSUN IMAGES
-local feature_extractor = torch.load('./models/feature_extractors/resnet-200.t7')
-feature_extractor:remove(14); feature_extractor:remove(13)
+local function init_feature_extractor(path_to_fs)
+  local feature_extractor = torch.load('./models/feature_extractors/resnet-200.t7')
+  feature_extractor:remove(14); 
+  feature_extractor:remove(13); 
+  feature_extractor:add(nn.View(2048)); 
+  feature_extractor = feature_extractor:cuda()
+  return feature_extractor
+end
 
 -- DCGAN GENERATORS AND DISCRIMINATORS
 local function load_pretrained_generators_LSUN(opt)
-  local G = {}; local D = {}
+  local GAN = {} 
   -- Initialize all the models with some pretrained model (let's say bridge generator)
   for idx_model = 1, #opt.full_data_classes do
-    G[idx_model] = torch.load('./models/LSUN_generators/pretrained/init_G.t7')
-    D[idx_model] = torch.load('./models/LSUN_generators/pretrained/init_D.t7')
+    GAN[idx_model] = {}
+    if opt.continue_training then
+      GAN[idx_model].G = torch.load('./models/progress/LSUN_generators/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_G.t7')
+      GAN[idx_model].D = torch.load('./models/progress/LSUN_generators/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_D.t7')
+    else
+      GAN[idx_model].G = torch.load('./models/LSUN_generators/pretrained/init_G.t7')
+      GAN[idx_model].D = torch.load('./models/LSUN_generators/pretrained/init_D.t7')
+    end
   end
+  if opt.continue_training then return GAN end
   -- Replace chosen classes with respective pretrained models
   for idx_model = 1, #opt.pretrainedClasses do
-    G[idx_model] = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_G.t7')
-    D[idx_model] = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_D.t7')
+    GAN[idx_model].G = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_G.t7')
+    GAN[idx_model].D = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_D.t7')
   end
-  -- If we want to continue training from last checkpoints
-  if opt.continue_training then
-    print('Loading models from previous training')
-    G[idx_model] = torch.load('./models/progress/LSUN_generators/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_G.t7')
-    D[idx_model] = torch.load('./models/progress/LSUN_generators' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_D.t7')
-  end
-  return G, D
+  return GAN
 end
 
 -------------------------------------------------------------------------------------------------------
--- ACCESSING AND LOADING DATA
+-- ACCESSING, GENERATING AND LOADING DATA
 -------------------------------------------------------------------------------------------------------
-
 local function initialize_loaders(opt)
   local data = {}; local N = #opt.full_data_classes
   for idx_class = 1, N do
@@ -91,43 +115,15 @@ local function initialize_loaders(opt)
   return data
 end
 
--- PRELOADING TESTSET, THIS ONE WON'T BE CHANGING 
-local testset = torch.load(path_to_testset) -- TO DO
-
-
-local criterion = nn.ClassNLLCriterion()
-local nb_classes = 10 
-
--------------------------------------------------------------------------------------------------------
--- LOADING AND/OR PREDEFINING CLASSIFICATION AND GENERATIVE MODELS
-------------------------------------------------------------------------------------------------------
-GAN = {}
-if opt.usePretrainedModels == true then
-  -- Use pretrained classifier and generators for several classes
-  C_model = torch.load('./pretrained_models/' .. dataset .. '/classifier.t7')
-  for idx = 1, 10 do
-    GAN[idx] = {}
-    if idx <= opt.initClassNb then
-      GAN[idx].D = torch.load('./pretrained_models/' .. dataset .. '/' .. data_classes[idx] .. '_D.t7')
-      GAN[idx].G = torch.load('./pretrained_models/' .. dataset .. '/' .. data_classes[idx] .. '_G.t7')
-    else 
-      GAN[idx].D = init_D()
-      GAN[idx].G = init_G()
-    end
-  end
-else
-  C_model = init_classifier(inSize, nbClasses, opt)
-  for idx = 1, 10 do
-    GAN[idx] = {}
-    GAN[idx].D = init_D()
-    GAN[idx].G = init_G()
-  end
+local function generate_data(G, batchSize)
+  local noise = torch.Tensor(batchSize, 100, 1, 1):cuda()
+  local batch = G:forward(noise:normal(0,1))
+  return batch
 end
-
 ---------------------------------------------------------------------------------------------------------
 -- FUNCTION TO FORM THE STREAM 
 ---------------------------------------------------------------------------------------------------------
-local function get_new_interval(old_classes, opt)
+local function get_new_interval(classes, opt)
   --[[ 
   - In this function we define our stream. We start it with N classes, and at each new interval of the stream we make some classes
   dissappear and some others appear in the stream. 
@@ -135,7 +131,7 @@ local function get_new_interval(old_classes, opt)
   - By the end of each interval we remove several classes and add some new so that the number of classes never exceeds OPT.MAXCLASSNB, and 
   in every new interval there is at least 1 and at most N-1 classes from previous interval, where N is the nb of classes in previous interval.
 -- ]]
-  local interval_classes = get_new_classes(old_classes, opt)
+  local interval_classes = get_new_classes(classes, opt)
   -- Defining the interval
   local interval_length = math.floor(torch.uniform(500,1000))
   local interval = torch.zeros(interval_length)
@@ -186,10 +182,14 @@ end
 local function init_buffer(opt)
   local buffer = torch.zeros(10, opt.bufferSize*opt.batchSize, 2048)
   local buffer_count = torch.zeros(10)
+  print('Buffer (re)initialized, batch count set to 0')
   return buffer, buffer_count
 end
 
 local function complete_buffer(buffer, buffer_count, GAN, opt)
+  --[[
+  Function to complete the buffer with generated data.
+  ]]
   local class_size = opt.bufferSize*opt.batchSize 
   local res = {}; res.data = torch.zeros(10*class_size, 2048); res.labels = torch.zeros(10*class_size)
   for idx_class = 1, 10 do
@@ -204,29 +204,53 @@ local function complete_buffer(buffer, buffer_count, GAN, opt)
   return res
 end
 ---------------------------------------------------------------------------------------------------------
-local old_classes = torch.DoubleTensor(opt.pretrainedClasses);  -- Initializing classes to the start of the stream
----------------------------------------------------------------------------------------------------------
 -- INITIALIZING TRAINING AND PARAMETERS
 ---------------------------------------------------------------------------------------------------------
 local data = initialize_loaders(opt)
 local interval_is_over = true
 local GAN_count = torch.zeros(10); local buffer_count = torch.zeros(10)
 local buffer = torch.zeros(10, opt.bufferSize*opt.batchSize, 2048)
+
 local Stream = true
+local classes = torch.FloatTensor(opt.pretrainedClasses);  -- Initializing classes to the start of the stream
 
 local buffer, buffer_count = init_buffer(opt)
 
+local classif_criterion = nn.ClassNLLCriterion()
+---------------------------------------------------------------------------------------------------------
+-- PRELOADING TESTSET, THIS ONE WON'T BE CHANGING 
+---------------------------------------------------------------------------------------------------------
+print('Loading the testset')
+local path_to_testset = './subsets/full/testset_5k_per_class_1.t7'
+local testset = torch.load(path_to_testset)
+print('Testset loaded, size: ' .. testset.data:size(1)); 
+---------------------------------------------------------------------------------------------------------
+-- INITIALIZING MODELS
+---------------------------------------------------------------------------------------------------------
+print('Initializing classification model'); local C_model = init_classifier_LSUN(inSize, nbClasses, opt)
+print('Initializing DCGANs'); local GAN = load_pretrained_generators_LSUN(opt)
+print('Loading feature extractor'); local feature_extractor = init_feature_extractor('./models/feature_extractors/resnet-200.t7')
+print('Models Initialized, start training'); sleep(2)
 ---------------------------------------------------------------------------------------------------------
 -- TRAINING
 ---------------------------------------------------------------------------------------------------------
-local function train_GAN(GAN_, data_)
 
+-- TEST for buffer completion
+res = complete_buffer(buffer, buffer_count, GAN, opt)
+print('Test complete, please check res')
+
+local function train_GAN(GAN_, data_)
+  
+end
+
+local function train_classifier(C_model, data)
+  
 end
 
 while Stream do
   if interval_is_over == true then 
-    classes = get_new_classes(old_classes) -- getting classes that would appear in the new interval
-    interval = get_new_interval(old_classes) -- fill in the interval with ordered classes of batches from stream
+    classes = get_new_classes(classes) -- getting classes that would appear in the new interval
+    interval = get_new_interval(classes) -- fill in the interval with ordered classes of batches from stream
     batch_idx = 1
     interval_is_over = false
   end  
@@ -236,6 +260,7 @@ while Stream do
   train_GAN(GAN[current_class], data_)
   local batch_features = feature_extractor:forward(batch_orig)
   
+  -- Filling in the buffer
   buffer_count[current_class] = buffer_count[current_class] + 1
   GAN_count[current_class] = GAN_count[current_class] + 1
   buffer[{{current_class},{1 + (buffer_count[current_class]-1)*opt.batchSize, buffer_count[current_class]*opt.batchSize},{}}] = batch_features
