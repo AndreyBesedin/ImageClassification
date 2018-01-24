@@ -23,7 +23,7 @@ opt = {
   maxClassNb = 5,      -- Maximum nb of classes in any stream interval
   usePretrainedModels = true,
   imSize = 224,
-  miniBatchSize = 64,
+  batchSize = 64,
   bufferSize = 100, -- Number of batches in the buffer
   gpu = 1,
   dropout = 0,
@@ -210,7 +210,6 @@ end
 local data = initialize_loaders(opt)
 local interval_is_over = true
 local GAN_count = torch.zeros(10); local buffer_count = torch.zeros(10)
-local buffer = torch.zeros(10, opt.bufferSize*opt.batchSize, 2048)
 
 local Stream = true
 local classes = torch.FloatTensor(opt.pretrainedClasses);  -- Initializing classes to the start of the stream
@@ -218,6 +217,7 @@ local classes = torch.FloatTensor(opt.pretrainedClasses);  -- Initializing class
 local buffer, buffer_count = init_buffer(opt)
 
 local classif_criterion = nn.ClassNLLCriterion()
+local GAN_criterion = nn.BCECriterion()
 ---------------------------------------------------------------------------------------------------------
 -- PRELOADING TESTSET, THIS ONE WON'T BE CHANGING 
 ---------------------------------------------------------------------------------------------------------
