@@ -9,7 +9,7 @@ require 'nngraph'
 opt = {
   lr = 0.001,
   initClassNb = 4, -- Number of already pretrained classes in the model
-  pretrainedClasses = {1, 2, 3, 4},
+  pretrainedClasses = { 2, 3, 4, 5},
   maxClassNb = 5,      -- Maximum nb of classes in any stream interval
   usePretrainedModels = true,
   imSize = 224,
@@ -18,12 +18,13 @@ opt = {
   gpu = 1,
   dropout = 0,
   testing = 'real',
+  continue_training = false,
   totalClasses = 10, -- Total nb of classes in stream, basically unknown but since we use static datasets as stream, let's say we know it... 
 }
 
 local data_classes = {'bedroom', 'bridge', 'church_outdoor', 'classroom', 'conference_room', 
                       'dining_room', 'kitchen', 'living_room', 'restaurant', 'tower'}
-
+opt.full_data_classes = data_classes
 opt.manualSeed = torch.random(1, 10000) -- fix seed
 torch.manualSeed(opt.manualSeed)
 torch.setnumthreads(1)
@@ -31,12 +32,16 @@ torch.setdefaulttensortype('torch.FloatTensor')
 cutorch.setDevice(1)
 
 -------------------------------------------------------------------------------------------------------
--- FUNCTIONS TO INITIALIZE MODELS
+-- FUNCTIONS TO INITIALIZE/LOAD MODELS
 -------------------------------------------------------------------------------------------------------
 
 -- LSUN_CLASSIFIER
 local function init_classifier_LSUN(inSize, nbClasses, opt)
    -- Defining classification model 
+  if opt.continue_training then
+    local C = torch.load('./models/progress/LSUN_classifier.t7')
+    return C
+  end
   local C = nn.Sequential(); 
   C:add(nn.Linear(inSize, 1024)):add(nn.ReLU())
   C:add(nn.Linear(1024, 512)):add(nn.ReLU())
@@ -46,81 +51,44 @@ local function init_classifier_LSUN(inSize, nbClasses, opt)
   return C
 end
 
-local function weights_init(m)
-  local name = torch.type(m)
-  if name:find('Convolution') then
-    m.weight:normal(0.0, 0.02)
-    m:noBias()
-  elseif name:find('BatchNormalization') then
-    if m.weight then m.weight:normal(1.0, 0.02) end
-    if m.bias then m.bias:fill(0) end
+-- FEATURE EXTRACTOR FOR LSUN IMAGES
+local feature_extractor = torch.load('./models/feature_extractors/resnet-200.t7')
+feature_extractor:remove(14); feature_extractor:remove(13)
+
+-- DCGAN GENERATORS AND DISCRIMINATORS
+local function load_pretrained_generators_LSUN(opt)
+  local G = {}; local D = {}
+  -- Initialize all the models with some pretrained model (let's say bridge generator)
+  for idx_model = 1, #opt.full_data_classes do
+    G[idx_model] = torch.load('./models/LSUN_generators/pretrained/init_G.t7')
+    D[idx_model] = torch.load('./models/LSUN_generators/pretrained/init_D.t7')
   end
-end
-
-local function init_G(opt)
-  local G = nn.Sequential()
-  local ngf = opt.GAN_params.ngf; local nc = opt.GAN_params.nc
-  G:add(SpatialFullConvolution(100, ngf * 8, 4, 4))
-  G:add(SpatialBatchNormalization(ngf * 8)):add(nn.ReLU(true))
-  -- state size: (ngf*8) x 4 x 4
-  G:add(SpatialFullConvolution(ngf * 8, ngf * 4, 4, 4, 2, 2, 1, 1))
-  G:add(SpatialBatchNormalization(ngf * 4)):add(nn.ReLU(true))
-  -- state size: (ngf*4) x 8 x 8
-  G:add(SpatialFullConvolution(ngf * 4, ngf * 2, 4, 4, 2, 2, 1, 1))
-  G:add(SpatialBatchNormalization(ngf * 2)):add(nn.ReLU(true))
-  -- state size: (ngf*2) x 16 x 16
-  G:add(SpatialFullConvolution(ngf * 2, ngf, 4, 4, 2, 2, 1, 1))
-  G:add(SpatialBatchNormalization(ngf)):add(nn.ReLU(true))
-  -- state size: (ngf) x 32 x 32
-  G:add(SpatialFullConvolution(ngf, nc, 4, 4, 2, 2, 1, 1))
-  G:add(nn.Tanh())
-  G:apply(weights_init)
-  return G
-end
-
-local function init_D()
-  local D = nn.Sequential()
-  D:add(SpatialConvolution(nc, ndf, 4, 4, 2, 2, 1, 1))
-  D:add(nn.LeakyReLU(0.2, true))
-   -- state size: (ndf) x 32 x 32
-  D:add(SpatialConvolution(ndf, ndf * 2, 4, 4, 2, 2, 1, 1))
-  D:add(SpatialBatchNormalization(ndf * 2)):add(nn.LeakyReLU(0.2, true))
-  -- state size: (ndf*2) x 16 x 16
-  D:add(SpatialConvolution(ndf * 2, ndf * 4, 4, 4, 2, 2, 1, 1))
-  D:add(SpatialBatchNormalization(ndf * 4)):add(nn.LeakyReLU(0.2, true))
-   -- state size: (ndf*4) x 8 x 8
-  D:add(SpatialConvolution(ndf * 4, ndf * 8, 4, 4, 2, 2, 1, 1))
-  D:add(SpatialBatchNormalization(ndf * 8)):add(nn.LeakyReLU(0.2, true))
-   -- state size: (ndf*8) x 4 x 4
-  D:add(SpatialConvolution(ndf * 8, 1, 4, 4))
-  D:add(nn.Sigmoid())
-  -- state size: 1 x 1 x 1
-  D:add(nn.View(1):setNumInputDims(3))
-  D:apply(weights_init)
-  return D
+  -- Replace chosen classes with respective pretrained models
+  for idx_model = 1, #opt.pretrainedClasses do
+    G[idx_model] = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_G.t7')
+    D[idx_model] = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_D.t7')
+  end
+  -- If we want to continue training from last checkpoints
+  if opt.continue_training then
+    print('Loading models from previous training')
+    G[idx_model] = torch.load('./models/progress/LSUN_generators/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_G.t7')
+    D[idx_model] = torch.load('./models/progress/LSUN_generators' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_D.t7')
+  end
+  return G, D
 end
 
 -------------------------------------------------------------------------------------------------------
 -- ACCESSING AND LOADING DATA
 -------------------------------------------------------------------------------------------------------
 
-local function getBatch(data, indices)
-  local batch = {}
-  batch.data = data.data:index(1, indices:long())
-  batch.labels = data.labels:index(1, indices:long())
-  return batch
-end
-
-local function load_dataset(data_name)
---  local data_folder = '/home/besedin/workspace/Data/LSUN/single_file_t7/'
-  local data_folder = '/home/besedin/workspace/Projects/ImageClassification/subsets/full/'
-  trainset = torch.load(data_folder .. 'lsun_full_50k_per_class.t7')            
-  trainset.data = trainset.data:cuda(); trainset.labels = trainset.labels:cuda()
-  opt.trainSize = trainset.labels:size(1)
-  testset = torch.load(data_folder .. 'lsun_full_2_50k_per_class.t7')
-  testset.data = testset.data:cuda(); testset.labels = testset.labels:cuda()
-  opt.testSize = testset.labels:size(1)
-  return trainset, testset
+local function initialize_loaders(opt)
+  local data = {}; local N = #opt.full_data_classes
+  for idx_class = 1, N do
+    opt.data_classes = {opt.full_data_classes[idx_class]}
+    DataLoader = dofile('./data.lua')
+    data[idx_class] = DataLoader.new(opt.nThreads, 'lsun', opt)
+  end
+  return data
 end
 
 -- PRELOADING TESTSET, THIS ONE WON'T BE CHANGING 
@@ -132,7 +100,7 @@ local nb_classes = 10
 
 -------------------------------------------------------------------------------------------------------
 -- LOADING AND/OR PREDEFINING CLASSIFICATION AND GENERATIVE MODELS
--------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------
 GAN = {}
 if opt.usePretrainedModels == true then
   -- Use pretrained classifier and generators for several classes
@@ -212,24 +180,72 @@ local function get_new_classes(classes, opt)
   return classes
 end
 
-local function get_batch_from_stream(class, index_list)
 ---------------------------------------------------------------------------------------------------------
 -- FUNCTION TO MANIPULATE THE BUFFER 
 ---------------------------------------------------------------------------------------------------------
-local function init_buffer(max_batches_per_class, totalClasses)
-  
+local function init_buffer(opt)
+  local buffer = torch.zeros(10, opt.bufferSize*opt.batchSize, 2048)
+  local buffer_count = torch.zeros(10)
+  return buffer, buffer_count
+end
+
+local function complete_buffer(buffer, buffer_count, GAN, opt)
+  local class_size = opt.bufferSize*opt.batchSize 
+  local res = {}; res.data = torch.zeros(10*class_size, 2048); res.labels = torch.zeros(10*class_size)
+  for idx_class = 1, 10 do
+    for idx_gen = buffer_count[idx_class] + 1, opt.bufferSize do
+      local gen_batch = generate_data(GAN[idx_class].G, opt.batchSize)
+      gen_batch = rescale_batch(gen_batch, 224)
+      buffer[{{idx_class},{1 + (idx_gen-1)*opt.batchSize, idx_gen*opt.batchSize},{}}] = feature_extractor:forward(gen_batch) 
+    end
+    res.labels[{{1 + (idx_class-1)*class_size, idx_class*class_size}}]:fill(idx_class)
+    res.data[{{1  + buffer_count[idx_class]},{}}] = buffer[{{idx_class},{},{}}]:squeeze()
+  end
+  return res
+end
+---------------------------------------------------------------------------------------------------------
+local old_classes = torch.DoubleTensor(opt.pretrainedClasses);  -- Initializing classes to the start of the stream
+---------------------------------------------------------------------------------------------------------
+-- INITIALIZING TRAINING AND PARAMETERS
+---------------------------------------------------------------------------------------------------------
+local data = initialize_loaders(opt)
+local interval_is_over = true
+local GAN_count = torch.zeros(10); local buffer_count = torch.zeros(10)
+local buffer = torch.zeros(10, opt.bufferSize*opt.batchSize, 2048)
+local Stream = true
+
+local buffer, buffer_count = init_buffer(opt)
 
 ---------------------------------------------------------------------------------------------------------
-local interval_is_over = true
-local old_classes = torch.DoubleTensor(opt.pretrainedClasses);  -- Initializing classes to the start of the stream
+-- TRAINING
+---------------------------------------------------------------------------------------------------------
+local function train_GAN(GAN_, data_)
+
+end
 
 while Stream do
-  if interval_is_over = true then 
+  if interval_is_over == true then 
     classes = get_new_classes(old_classes) -- getting classes that would appear in the new interval
-    interval = get_new_interval(old_classes) -- fill in the interval with ordered classes of batches from stream  
+    interval = get_new_interval(old_classes) -- fill in the interval with ordered classes of batches from stream
+    batch_idx = 1
+    interval_is_over = false
   end  
-  local batch = getBatch(Stream, opt.batchSize)
+
+  local current_class = interval[batch_idx]
+  local batch_orig = data[current_class]:getBatch() 
+  train_GAN(GAN[current_class], data_)
+  local batch_features = feature_extractor:forward(batch_orig)
   
+  buffer_count[current_class] = buffer_count[current_class] + 1
+  GAN_count[current_class] = GAN_count[current_class] + 1
+  buffer[{{current_class},{1 + (buffer_count[current_class]-1)*opt.batchSize, buffer_count[current_class]*opt.batchSize},{}}] = batch_features
+  if buffer_count[current_class] == opt.bufferSize then
+    buffer = complete_buffer(buffer, GAN)
+    C_model = train_classifier(C_model, buffer)
+    test_classifier(C_model, testset)
+    buffer, buffer_count = init_buffer(opt)
+  end
+
   optimState = {
     learningRate = opt.lr,
     beta1 = opt.beta1,
