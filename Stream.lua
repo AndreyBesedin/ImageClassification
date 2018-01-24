@@ -109,7 +109,7 @@ local function initialize_loaders(opt)
   local data = {}; local N = #opt.full_data_classes
   for idx_class = 1, N do
     opt.data_classes = {opt.full_data_classes[idx_class]}
-    DataLoader = dofile('./data.lua')
+    DataLoader = dofile('./data/data.lua')
     data[idx_class] = DataLoader.new(opt.nThreads, 'lsun', opt)
   end
   return data
