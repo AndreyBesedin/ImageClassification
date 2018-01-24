@@ -17,6 +17,7 @@ dofile('./tools/tools.lua')
 -------------------------------------------------------------------------------------------------------
 opt = {
   lr = 0.001,
+  nThreads = 6,
   initClassNb = 4, -- Number of already pretrained classes in the model
   pretrainedClasses = { 2, 3, 4, 5},
   maxClassNb = 5,      -- Maximum nb of classes in any stream interval
