@@ -35,10 +35,10 @@ function data.new(n, dataset_name, opt_)
                                 local seed = (opt.manualSeed and opt.manualSeed or 0) + idx
                                 torch.manualSeed(seed)
                                 torch.setnumthreads(1)
-                                print(string.format('Starting donkey with id: %d seed: %d', tid, seed))
+                                --print(string.format('Starting donkey with id: %d seed: %d', tid, seed))
                                 assert(options, 'options not found')
                                 assert(opt, 'opt not given')
-                                print(opt)
+                                --print(opt)
                                 paths.dofile(donkey_file)
                              end
       )

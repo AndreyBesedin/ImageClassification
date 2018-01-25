@@ -20,10 +20,10 @@ ffi = require 'ffi'
 --           'dining_room', 'kitchen', 'living_room', 'restaurant', 'tower'}
 classes = opt.data_classes
 table.sort(classes)
-print('Classes:')
-for k,v in pairs(classes) do
-   print(k, v)
-end
+-- print('Classes:')
+-- for k,v in pairs(classes) do
+--    print(k, v)
+-- end
 
 -- Check for existence of opt.data
 opt.data = os.getenv('DATA_ROOT') or os.getenv('HOME') .. '/local/lsun'
@@ -81,16 +81,16 @@ end
 
 --------------------------------------
 -- trainLoader
-print('initializing train loader')
+--print('initializing train loader')
 trainLoader = {}
 trainLoader.classes = classes
 trainLoader.indices = {}
 trainLoader.db = {}
 trainLoader.db_reader = {}
 for i=1,#classes do
-   print('initializing: ', classes[i])
+--   print('initializing: ', classes[i])
    trainLoader.indices[i] = torch.load(paths.concat(trainPath, classes[i]
-                                                        .. '_train_lmdb_hashes_chartensor_50k.t7'))
+                                                        .. '_train_lmdb_hashes_chartensor.t7'))
    trainLoader.db[i] = lmdb.env{Path=paths.concat(trainPath, classes[i] .. '_train_lmdb'),
                                 RDONLY=true, NOLOCK=true, NOTLS=true, NOSYNC=true, NOMETASYNC=true,
                                MaxReaders=20, MaxDBs=20}

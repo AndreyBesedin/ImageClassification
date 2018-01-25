@@ -6,6 +6,7 @@
 -------------------------------------------------------------------------------------------------------
 -- LOADING PACKAGES
 -------------------------------------------------------------------------------------------------------
+print('LOADING DEPENDENCIES...')
 require 'cunn'
 require 'cudnn'
 require 'image'
@@ -23,8 +24,11 @@ opt = {
   maxClassNb = 5,      -- Maximum nb of classes in any stream interval
   usePretrainedModels = true,
   imSize = 224,
-  batchSize = 64,
-  bufferSize = 100, -- Number of batches in the buffer
+  batchSize = 16,
+  loadSize = 256,
+  fineSize = 224,
+  interval_size = {300, 400},
+  bufferSize = 50, -- Number of batches in the buffer
   gpu = 1,
   dropout = 0,
   testing = 'real',
@@ -34,8 +38,7 @@ opt = {
 
 -- Full list of available classes
 local data_classes = {'bedroom', 'bridge', 'church_outdoor', 'classroom', 'conference_room', 
-                      'dining_room', 'kitchen', 'living_room', 'restaurant', 'tower'}
-                      
+                      'dining_room', 'kitchen', 'living_room', 'restaurant', 'tower'}                      
 -------------------------------------------------------------------------------------------------------
 -- MODIFYING OPTIONS
 -------------------------------------------------------------------------------------------------------
@@ -56,7 +59,7 @@ cutorch.setDevice(1)
 -------------------------------------------------------------------------------------------------------
 
 -- LSUN_CLASSIFIER
-local function init_classifier_LSUN(inSize, nbClasses, opt)
+function init_classifier_LSUN(inSize, nbClasses, opt)
    -- Defining classification model 
   if opt.continue_training then
     local C = torch.load('./models/progress/LSUN_classifier.t7')
@@ -71,17 +74,17 @@ local function init_classifier_LSUN(inSize, nbClasses, opt)
   return C
 end
 -- FEATURE EXTRACTOR FOR LSUN IMAGES
-local function init_feature_extractor(path_to_fs)
+function init_feature_extractor(path_to_fs)
   local feature_extractor = torch.load('./models/feature_extractors/resnet-200.t7')
   feature_extractor:remove(14); 
   feature_extractor:remove(13); 
   feature_extractor:add(nn.View(2048)); 
-  feature_extractor = feature_extractor:cuda()
-  return feature_extractor
+  feature_extractor = feature_extractor:float()
+  return feature_extractor:cuda()
 end
 
 -- DCGAN GENERATORS AND DISCRIMINATORS
-local function load_pretrained_generators_LSUN(opt)
+function load_pretrained_generators_LSUN(opt)
   local GAN = {} 
   -- Initialize all the models with some pretrained model (let's say bridge generator)
   for idx_model = 1, #opt.full_data_classes do
@@ -106,9 +109,11 @@ end
 -------------------------------------------------------------------------------------------------------
 -- ACCESSING, GENERATING AND LOADING DATA
 -------------------------------------------------------------------------------------------------------
-local function initialize_loaders(opt)
+function initialize_loaders(opt)
+  print('\nINITIALIZING DATA LOADERS');
   local data = {}; local N = #opt.full_data_classes
   for idx_class = 1, N do
+    print('Reading ' .. opt.full_data_classes[idx_class] .. ' DB')
     opt.data_classes = {opt.full_data_classes[idx_class]}
     DataLoader = dofile('./data/data.lua')
     data[idx_class] = DataLoader.new(opt.nThreads, 'lsun', opt)
@@ -116,15 +121,28 @@ local function initialize_loaders(opt)
   return data
 end
 
-local function generate_data(G, batchSize)
-  local noise = torch.Tensor(batchSize, 100, 1, 1):cuda()
+function generate_data(G, batchSize)
+  local noise = torch.FloatTensor(batchSize, 100, 1, 1):cuda()
   local batch = G:forward(noise:normal(0,1))
-  return batch
+  batch = batch:float()
+  return batch:cuda()
+end
+
+ function rescale_3D_batch(batch, outSize)
+  if #batch:size()<4 then error('not 3D data batch') end
+  if batch:size(3)~=batch:size(4) then error('images are not square') end
+  local batchSize = batch:size(1)
+  local imSize = batch:size(3)
+  local new_batch = torch.FloatTensor(batchSize, 3, outSize, outSize)
+  for idx_im = 1, batchSize do
+    new_batch[idx_im] = image.scale(batch[idx_im], outSize)
+  end
+  return new_batch:float()
 end
 ---------------------------------------------------------------------------------------------------------
 -- FUNCTION TO FORM THE STREAM 
 ---------------------------------------------------------------------------------------------------------
-local function get_new_interval(classes, opt)
+function get_new_interval(classes, opt)
   --[[ 
   - In this function we define our stream. We start it with N classes, and at each new interval of the stream we make some classes
   dissappear and some others appear in the stream. 
@@ -134,7 +152,8 @@ local function get_new_interval(classes, opt)
 -- ]]
   local interval_classes = get_new_classes(classes, opt)
   -- Defining the interval
-  local interval_length = math.floor(torch.uniform(500,1000))
+  local interval_length = math.floor(torch.uniform(opt.interval_size[1],opt.interval_size[2]))
+  print('New interval contains ' .. interval_length .. ' batches')
   local interval = torch.zeros(interval_length)
   local idx_batch = 1
   if not current_class then current_class = 1 end
@@ -142,14 +161,15 @@ local function get_new_interval(classes, opt)
     -- Choose class from available in the interval, but different from the current
     current_class = interval_classes[interval_classes:ne(current_class)][torch.random(interval_classes:size(1)-1)] 
     -- Number of consequent batches that come from one class
-    local class_duration = math.floor(torch.uniform(5,30))
+    local class_duration = math.floor(torch.uniform(5,15))
+    print('Class: ' .. current_class .. ', duration: ' .. class_duration .. ' batches')
     interval[{{idx_batch, math.min(idx_batch + class_duration, interval_length)}}]:fill(current_class);
     idx_batch = idx_batch + class_duration
   end
   return interval, interval_classes
 end
   
-local function get_new_classes(classes, opt)
+function get_new_classes(classes, opt)
   local available_classes = torch.range(1, opt.totalClasses)
   -- We have limited nb of classes in one interval
   maxClassNb = opt.maxClassNb
@@ -180,123 +200,99 @@ end
 ---------------------------------------------------------------------------------------------------------
 -- FUNCTION TO MANIPULATE THE BUFFER 
 ---------------------------------------------------------------------------------------------------------
-local function init_buffer(opt)
+function init_buffer(opt)
   local buffer = torch.zeros(10, opt.bufferSize*opt.batchSize, 2048)
   local buffer_count = torch.zeros(10)
-  print('Buffer (re)initialized, batch count set to 0')
+  print('\nBUFFER (RE)INITIALIZED, BATCH COUNT SET TO ZERO')
   return buffer, buffer_count
 end
 
-local function complete_buffer(buffer, buffer_count, GAN, opt)
+function complete_buffer(buffer, buffer_count, GAN, feature_extractor, opt)
   --[[
   Function to complete the buffer with generated data.
   ]]
-  local class_size = opt.bufferSize*opt.batchSize 
+  print('\nCOMPLETENIG BUFFER WITH GENERATED DATA');
+  local class_size = opt.bufferSize * opt.batchSize 
   local res = {}; res.data = torch.zeros(10*class_size, 2048); res.labels = torch.zeros(10*class_size)
   for idx_class = 1, 10 do
+    print('Generating ' .. opt.full_data_classes[idx_class] .. 's')
     for idx_gen = buffer_count[idx_class] + 1, opt.bufferSize do
-      local gen_batch = generate_data(GAN[idx_class].G, opt.batchSize)
-      gen_batch = rescale_batch(gen_batch, 224)
-      buffer[{{idx_class},{1 + (idx_gen-1)*opt.batchSize, idx_gen*opt.batchSize},{}}] = feature_extractor:forward(gen_batch) 
+      xlua.progress(idx_gen, opt.bufferSize)
+      local gen_batch_small = generate_data(GAN[idx_class].G, opt.batchSize)
+      local gen_batch_big = rescale_3D_batch(gen_batch_small:float(), 224)
+      local features = feature_extractor:forward(gen_batch_big:cuda()) 
+      buffer[{{idx_class},{1 + (idx_gen-1)*opt.batchSize, idx_gen*opt.batchSize},{}}] = features:float()
     end
     res.labels[{{1 + (idx_class-1)*class_size, idx_class*class_size}}]:fill(idx_class)
-    res.data[{{1  + buffer_count[idx_class]},{}}] = buffer[{{idx_class},{},{}}]:squeeze()
+    res.data[{{1  + (idx_class-1)*class_size, idx_class*class_size},{}}] = buffer[{{idx_class},{},{}}]:squeeze()
   end
   return res
 end
----------------------------------------------------------------------------------------------------------
--- INITIALIZING TRAINING AND PARAMETERS
----------------------------------------------------------------------------------------------------------
-local data = initialize_loaders(opt)
-local interval_is_over = true
-local GAN_count = torch.zeros(10); local buffer_count = torch.zeros(10)
 
-local Stream = true
-local classes = torch.FloatTensor(opt.pretrainedClasses);  -- Initializing classes to the start of the stream
-
-local buffer, buffer_count = init_buffer(opt)
-
-local classif_criterion = nn.ClassNLLCriterion()
-local GAN_criterion = nn.BCECriterion()
 ---------------------------------------------------------------------------------------------------------
--- PRELOADING TESTSET, THIS ONE WON'T BE CHANGING 
----------------------------------------------------------------------------------------------------------
-print('Loading the testset')
-local path_to_testset = './subsets/full/testset_5k_per_class_1.t7'
-local testset = torch.load(path_to_testset)
-print('Testset loaded, size: ' .. testset.data:size(1)); 
----------------------------------------------------------------------------------------------------------
--- INITIALIZING MODELS
----------------------------------------------------------------------------------------------------------
-print('Initializing classification model'); local C_model = init_classifier_LSUN(inSize, nbClasses, opt)
-print('Initializing DCGANs'); local GAN = load_pretrained_generators_LSUN(opt)
-print('Loading feature extractor'); local feature_extractor = init_feature_extractor('./models/feature_extractors/resnet-200.t7')
-print('Models Initialized, start training'); sleep(2)
----------------------------------------------------------------------------------------------------------
--- TRAINING
+-- TRAINING/TESTING FUNCTIONS 
 ---------------------------------------------------------------------------------------------------------
 
--- TEST for buffer completion
-res = complete_buffer(buffer, buffer_count, GAN, opt)
-print('Test complete, please check res')
 
-local function train_GAN(GAN_, data_)
+function train_GAN(GAN, data)  
+  parametersD, gradParametersD = GAN.D:getParameters()
+  parametersG, gradParametersG = GAN.G:getParameters()
+  input = torch.CudaTensor(opt.batchSize, 3, 64, 64)
+  noise = torch.CudaTensor(opt.batchSize, 100, 1, 1)
+  label = torch.CudaTensor(opt.batchSize)
+  local fDx = function(x)
+    gradParametersD:zero()
+    -- train with real
+    local real = data:cuda()
+    input:copy(real)
+    label:fill(1)
+    local output = GAN.D:forward(input)
+    local errD_real = GAN_criterion:forward(output, label)
+    local df_do = GAN_criterion:backward(output, label)
+    GAN.D:backward(input, df_do)
+
+    -- train with fake
+    noise:normal(0, 1)
+    local fake = GAN.G:forward(noise)
+    input:copy(fake)
+    label:fill(0)
+
+    local output = GAN.D:forward(input)
+    local errD_fake = GAN_criterion:forward(output, label)
+    local df_do = GAN_criterion:backward(output, label)
+    GAN.D:backward(input, df_do)
+
+    errD = errD_real + errD_fake
+    return errD, gradParametersD
+  end
   
-end
+  local fGx = function(x)
+    gradParametersG:zero()
 
-local function train_classifier(C_model, data)
-  
-end
+    --[[ the three lines below were already executed in fDx, so save computation
+    noise:uniform(-1, 1) -- regenerate random noise
+    local fake = netG:forward(noise)
+    input:copy(fake) ]]--
+    label:fill(1) -- fake labels are real for generator cost
 
-while Stream do
-  if interval_is_over == true then 
-    classes = get_new_classes(classes) -- getting classes that would appear in the new interval
-    interval = get_new_interval(classes) -- fill in the interval with ordered classes of batches from stream
-    batch_idx = 1
-    interval_is_over = false
-  end  
+    local output = GAN.D.output -- netD:forward(input) was already executed in fDx, so save computation
+    errG = GAN_criterion:forward(output, label)
+    local df_do = GAN_criterion:backward(output, label)
+    local df_dg = GAN.D:updateGradInput(input, df_do)
 
-  local current_class = interval[batch_idx]
-  local batch_orig = data[current_class]:getBatch() 
-  train_GAN(GAN[current_class], data_)
-  local batch_features = feature_extractor:forward(batch_orig)
-  
-  -- Filling in the buffer
-  buffer_count[current_class] = buffer_count[current_class] + 1
-  GAN_count[current_class] = GAN_count[current_class] + 1
-  buffer[{{current_class},{1 + (buffer_count[current_class]-1)*opt.batchSize, buffer_count[current_class]*opt.batchSize},{}}] = batch_features
-  if buffer_count[current_class] == opt.bufferSize then
-    buffer = complete_buffer(buffer, GAN)
-    C_model = train_classifier(C_model, buffer)
-    test_classifier(C_model, testset)
-    buffer, buffer_count = init_buffer(opt)
+    GAN.G:backward(noise, df_dg)
+    return errG, gradParametersG
   end
 
-  optimState = {
-    learningRate = opt.lr,
-    beta1 = opt.beta1,
-    beta2 = opt.beta2,
-    epsilon = opt.epsilon
-  }
+  optim.adam(fDx, parametersD, optimStateD)
+  optim.adam(fGx, parametersG, optimStateG)
+  parametersD, gradParametersD = nil, nil -- nil them to avoid spiking memory
+  parametersG, gradParametersG = nil, nil
+  collectgarbage()
+  return GAN
+end
 
-  config = {
-    learningRate = opt.lr,
-    beta1 = opt.beta1,
-    beta2 = opt.beta2,
-    epsilon = opt.epsilon
-  }
-
-  local input = torch.CudaTensor(opt.batchSize, testset.data:size(2))
-  local label = torch.CudaTensor(opt.batchSize)
-  local errM
-  local epoch_tm = torch.Timer()
-  local tm = torch.Timer()
-  local data_tm = torch.Timer()
-  local accuracies = torch.zeros(2, opt.niter)
-
-  criterion = criterion:cuda()
-  local p, gp = C_model:getParameters()
-  p = p:normal(0, 1)
+function train_classifier(C_model, data, opt)
   local fx = function(x)
     if x ~= p then p:copy(x) end
     gp:zero()
@@ -309,57 +305,141 @@ while Stream do
     confusion_train:batchAdd(y_max:squeeze():float(), label:float())
     return errM, gp
   end
-
-  local function test_model()
-    local confusion = optim.ConfusionMatrix(nb_classes)
-    confusion:zero()
-    for idx = 1, opt.testSize, opt.batchSize do
-      --xlua.progress(idx, opt.testSize)
-      indices = torch.range(idx, math.min(idx+opt.batchSize, opt.testSize))
-      local batch = getBatch(testset, indices)
-      local y = C_model:forward(batch.data)
-      y = y:float()
-      _, y_max = y:max(2)
-      confusion:batchAdd(y_max:squeeze():float(), batch.labels:float())
-    end
-    confusion:updateValids()
-    return confusion
+  
+  input = torch.CudaTensor(opt.batchSize, data.data:size(2))
+  label = torch.CudaTensor(opt.batchSize)
+  criterion = classif_criterion:cuda()
+  p, gp = C_model:getParameters()
+  p = p:normal(0, 1)
+  local indices_rand = torch.randperm(data.data:size(1))
+  confusion_train = optim.ConfusionMatrix(10)
+  confusion_train:zero()
+  
+  for i = 1, math.floor(data.data:size(1)/opt.batchSize) do 
+    xlua.progress(i, math.floor(data.data:size(1)/opt.batchSize))
+    indices = indices_rand[{{1+(i-1)*opt.batchSize, i*opt.batchSize}}]
+    batch = getBatch(data, indices:long())
+    input:copy(batch.data)
+    label:copy(batch.labels)
+    optim.adam(fx, p, config, optimState)
+    C_model:clearState()
+    p, gp = C_model:getParameters()
   end
+  return C_model
+end
 
-  C_model:training()
+function getBatch(data, indices)
+  local batch = {}
+  batch.data = data.data:index(1, indices:long())
+  batch.labels = data.labels:index(1, indices:long())
+  return batch
+end
 
-  --firstEpochAccuracies = torch.zeros(3*math.floor(opt.trainSize/opt.batchSize))
-  idx = 1
-  for epoch = 1, opt.niter do
-    local indices_rand = torch.randperm(opt.trainSize)
-    confusion_train = optim.ConfusionMatrix(nb_classes)
-    confusion_train:zero()
-    for i = 1, math.floor(opt.trainSize/opt.batchSize) do 
-      xlua.progress(i, math.floor(opt.trainSize/opt.batchSize))
-      indices = indices_rand[{{1+(i-1)*opt.batchSize, i*opt.batchSize}}]
-      batch =  getBatch(trainset, indices)
-      input:copy(batch.data)
-      label:copy(batch.labels)
-      optim.adam(fx, p, config, optimState)
-      C_model:clearState()
-      p, gp = C_model:getParameters()
-      --if epoch <=3 and i%100 == 0 then
-      --  local conf = test_model()
-        --firstEpochAccuracies[idx] = conf.totalValid; idx = idx + 1  
-      --  print('First epochs accuracies: '); print(conf.totalValid)
-      --end
-    end
-    local conf = test_model()
-    print('test_accuracy: ')
-    print(conf)
-    confusion_train:updateValids()
-    C_model:evaluate()
-    local conf = test_model()
-    accuracies[1][epoch] = confusion_train.totalValid
-    accuracies[2][epoch] = conf.totalValid
-    C_model:training()
-    print('Epoch: ' .. epoch .. ' out of ' .. opt.niter  .. '; Test performance: ' .. accuracies[2][epoch] .. '; Train performance: ' .. accuracies[1][epoch])
+function test_classifier(C_model, data)
+  local confusion = optim.ConfusionMatrix(10)
+  confusion:zero()
+  for idx = 1, data.data:size(1), opt.batchSize do
+    --xlua.progress(idx, opt.testSize)
+    indices = torch.range(idx, math.min(idx + opt.batchSize, data.data:size(1)))
+    local batch = getBatch(testset, indices:long())
+    local y = C_model:forward(batch.data:cuda())
+    y = y:float()
+    _, y_max = y:max(2)
+    confusion:batchAdd(y_max:squeeze():float(), batch.labels:float())
   end
-  torch.save('first_epochs_' .. data_name[opt.exp_nb] .. '.t7', firstEpochAccuracies)
---  torch.save('accuracies_' .. data_name[opt.exp_nb] .. '.t7', accuracies)
+  confusion:updateValids()
+  return confusion  
+end
+
+---------------------------------------------------------------------------------------------------------
+-- INITIALIZING TRAINING AND PARAMETERS
+---------------------------------------------------------------------------------------------------------
+        
+if not DATA then DATA = initialize_loaders(opt) end
+local interval_is_over = true; local interval_idx = 0
+local GAN_count = torch.zeros(10); local buffer_count = torch.zeros(10)
+
+local Stream = true
+local classes = torch.FloatTensor(opt.pretrainedClasses);  -- Initializing classes to the start of the stream
+
+buffer, buffer_count = init_buffer(opt)
+
+classif_criterion = nn.ClassNLLCriterion()
+GAN_criterion = nn.BCECriterion()
+GAN_criterion = GAN_criterion:cuda()
+
+local test_res = {}
+
+optimState = {
+  learningRate = opt.lr,
+}
+
+config = {
+  learningRate = opt.lr,
+}
+
+---------------------------------------------------------------------------------------------------------
+-- PRELOADING TESTSET, THIS ONE WON'T BE CHANGING 
+---------------------------------------------------------------------------------------------------------
+
+print('\nLOADING THE TESTSET')
+path_to_testset = './subsets/full/testset_5k_per_class_1.t7'
+testset = torch.load(path_to_testset)
+print('\nTESTSET LOADED, SIZE: ' .. testset.data:size(1)); 
+
+---------------------------------------------------------------------------------------------------------
+-- INITIALIZING MODELS
+---------------------------------------------------------------------------------------------------------
+
+print('\nINITIALIZING CLASSIFICATION MODEL'); C_model = init_classifier_LSUN(2048, 10, opt)
+print('\nINITIALIZING DCGANs'); GAN = load_pretrained_generators_LSUN(opt)
+print('\nLOADING FEATURE EXTRACTOR'); feature_extractor = init_feature_extractor('./models/feature_extractors/resnet-200.t7')
+print('\nMODELS INITIALIZED, START TRAINING'); sleep(2)
+
+p, gp = C_model:getParameters()
+---------------------------------------------------------------------------------------------------------
+-- TRAINING
+---------------------------------------------------------------------------------------------------------
+
+-- TEST for buffer completion
+--buffer_count[1] = 55; buffer_count[2] = 10;  buffer_count[3] = opt.bufferSize;
+--res = complete_buffer(buffer, buffer_count, GAN, feature_extractor, opt)
+--print('Test complete, please check res')
+
+
+while Stream do
+  collectgarbage()
+  if interval_is_over == true then 
+    print('\nInterval ' .. interval_idx .. ' is over, starting next')
+    interval_idx = interval_idx + 1
+--    classes = get_new_classes(classes, opt) -- getting classes that would appear in the new interval
+    interval, classes = get_new_interval(classes, opt) -- fill in the interval with ordered classes of batches from stream
+    print('New classes: '); print(classes:reshape(1,classes:size(1)))
+    batch_idx = 1
+    interval_is_over = false
+  end 
+  local current_class = interval[batch_idx]
+  batch_idx = batch_idx + 1
+  batch_orig = DATA[current_class]:getBatch(opt.batchSize)
+  --print('RECEIVED DATA FROM CLASS ' .. current_class)
+  train_GAN(GAN[current_class], rescale_3D_batch(batch_orig:float(), 64))
+  local batch_features = feature_extractor:forward(batch_orig:cuda())
+  
+  -- Filling in the buffer
+  buffer_count[current_class] = buffer_count[current_class] + 1
+  xlua.progress(buffer_count:sum(), opt.bufferSize*classes:size(1))
+  GAN_count[current_class] = GAN_count[current_class] + 1
+  buffer[{{current_class},{1 + (buffer_count[current_class]-1)*opt.batchSize, buffer_count[current_class]*opt.batchSize},{}}] = batch_features:float()
+  if buffer_count[current_class] == opt.bufferSize then
+    print('Collected enough data. Samples distribution by class: '); print(buffer_count:reshape(1,10)) 
+    buffer = complete_buffer(buffer, buffer_count, GAN, feature_extractor, opt)
+    print('Training clasifier with collected data')
+    C_model = train_classifier(C_model, buffer, opt)
+    buffer, buffer_count = init_buffer(opt)
+  end
+  if batch_idx == interval:size(1) then 
+    interval_is_over = true
+    print('Currently real images fed to GANS, per class: '); print(GAN_count:reshape(1, 10)*opt.batchSize)
+    confusion = test_classifier(C_model, testset); print(confusion)
+  end
 end
