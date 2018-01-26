@@ -412,7 +412,8 @@ p, gp = C_model:getParameters()
 --res = complete_buffer(buffer, buffer_count, GAN, feature_extractor, opt)
 --print('Test complete, please check res')
 
-
+to_save = {}
+to_save.confusion = {}
 while Stream do
   collectgarbage()
   if interval_is_over == true then 
@@ -448,5 +449,11 @@ while Stream do
     interval_is_over = true
     print('Currently real images fed to GANS, per class: '); print(GAN_count:reshape(1, 10)*opt.batchSize)
     confusion = test_classifier(C_model, testset); print(confusion)
+    to_save.confusion[interval_idx] = confusion
+    to_save.GAN_count = GAN_count
+    torch.save('./results/LSUN/stream/confusions.t7', to_save)
+    if interval_idx%10==0 then
+      torch.save('./models/progress/LSUN_generators/interval_' .. interval_idx .. '_DCGAN.t7', GAN)
+    end
   end
 end
