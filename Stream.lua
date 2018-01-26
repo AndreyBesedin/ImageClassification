@@ -20,7 +20,7 @@ opt = {
   lr = 0.001,
   nThreads = 6,
   initClassNb = 4, -- Number of already pretrained classes in the model
-  pretrainedClasses = { 2, 3, 4, 5},
+  pretrainedClasses = {2, 3, 4, 5},
   maxClassNb = 5,      -- Maximum nb of classes in any stream interval
   usePretrainedModels = true,
   imSize = 224,
@@ -153,7 +153,7 @@ function get_new_interval(classes, opt)
   local interval_classes = get_new_classes(classes, opt)
   -- Defining the interval
   local interval_length = math.floor(torch.uniform(opt.interval_size[1],opt.interval_size[2]))
-  print('New interval contains ' .. interval_length .. ' batches')
+  --print('New interval contains ' .. interval_length .. ' batches')
   local interval = torch.zeros(interval_length)
   local idx_batch = 1
   if not current_class then current_class = 1 end
@@ -162,7 +162,7 @@ function get_new_interval(classes, opt)
     current_class = interval_classes[interval_classes:ne(current_class)][torch.random(interval_classes:size(1)-1)] 
     -- Number of consequent batches that come from one class
     local class_duration = math.floor(torch.uniform(5,15))
-    print('Class: ' .. current_class .. ', duration: ' .. class_duration .. ' batches')
+    --print('Class: ' .. current_class .. ', duration: ' .. class_duration .. ' batches')
     interval[{{idx_batch, math.min(idx_batch + class_duration, interval_length)}}]:fill(current_class);
     idx_batch = idx_batch + class_duration
   end
@@ -233,8 +233,7 @@ end
 -- TRAINING/TESTING FUNCTIONS 
 ---------------------------------------------------------------------------------------------------------
 
-
-function train_GAN(GAN, data)  
+function train_GAN(GAN, data, optimState_)  
   parametersD, gradParametersD = GAN.D:getParameters()
   parametersG, gradParametersG = GAN.G:getParameters()
   input = torch.CudaTensor(opt.batchSize, 3, 64, 64)
@@ -284,12 +283,12 @@ function train_GAN(GAN, data)
     return errG, gradParametersG
   end
 
-  optim.adam(fDx, parametersD, optimStateD)
-  optim.adam(fGx, parametersG, optimStateG)
+  optim.adam(fDx, parametersD, optimState_.D)
+  optim.adam(fGx, parametersG, optimState_.G)
   parametersD, gradParametersD = nil, nil -- nil them to avoid spiking memory
   parametersG, gradParametersG = nil, nil
   collectgarbage()
-  return GAN
+  return GAN, errD, errG
 end
 
 function train_classifier(C_model, data, opt)
@@ -325,6 +324,8 @@ function train_classifier(C_model, data, opt)
     C_model:clearState()
     p, gp = C_model:getParameters()
   end
+  print('Training set confusion matrix: ')
+  print(confusion_train)
   return C_model
 end
 
@@ -369,7 +370,12 @@ GAN_criterion = nn.BCECriterion()
 GAN_criterion = GAN_criterion:cuda()
 
 local test_res = {}
-
+optimState_GAN = {}
+for idx = 1, 10 do
+  optimState_GAN[idx]= {}
+  optimState_GAN[idx].D = {learningRate=0.0002, beta1 = 0.5}
+  optimState_GAN[idx].G = {learningRate=0.0002, beta1 = 0.5}
+end
 optimState = {
   learningRate = opt.lr,
 }
@@ -422,7 +428,8 @@ while Stream do
   batch_idx = batch_idx + 1
   batch_orig = DATA[current_class]:getBatch(opt.batchSize)
   --print('RECEIVED DATA FROM CLASS ' .. current_class)
-  train_GAN(GAN[current_class], rescale_3D_batch(batch_orig:float(), 64))
+  GAN[current_class], errD, errG = train_GAN(GAN[current_class], rescale_3D_batch(batch_orig:float(), 64), optimState_GAN[current_class])
+  print('Class ' .. current_class .. ', errD = ' .. errD .. ', errG = ' .. errG)
   local batch_features = feature_extractor:forward(batch_orig:cuda())
   
   -- Filling in the buffer
