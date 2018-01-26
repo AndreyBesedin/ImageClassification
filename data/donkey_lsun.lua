@@ -111,22 +111,23 @@ end
 
 function trainLoader:sample(quantity)
    local data = torch.Tensor(quantity, sampleSize[1], sampleSize[2], sampleSize[2])
-   local label = torch.Tensor(quantity)
-   for i=1, quantity do
+   local idx = 1
+   while idx <= quantity do
       local class = torch.random(1, #self.classes)
       local index = torch.random(1, self.indices[class]:size(1))
       local hash = ffi.string(trainLoader.indices[class][index]:data(), trainLoader.indices[class]:size(2))
       local imgblob = getData(self.db_reader[class], hash, true)
       if pcall(trainHook, imgblob) then
         local out = trainHook(imgblob)
-        data[i]:copy(out)
-        label[i] = class
+        data[idx]:copy(out)
+        idx = idx + 1
       else
-        data[i]:copy(data[i-1])
+        print('Inexistant image or bad hash, taking next index ')
+--        data[i]:copy(data[i-1])
       end
    end
    collectgarbage(); collectgarbage()
-   return data, label
+   return data
 end
 
 function trainLoader:size()
