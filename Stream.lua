@@ -106,8 +106,8 @@ function load_pretrained_generators_LSUN(opt)
   if opt.continue_training then return GAN end
   -- Replace chosen classes with respective pretrained models
   for idx_model = 1, #opt.pretrainedClasses do
-    GAN[idx_model].G = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_G.t7')
-    GAN[idx_model].D = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_D.t7')
+    GAN[opt.pretrainedClasses[idx_model]].G = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_G.t7')
+    GAN[opt.pretrainedClasses[idx_model]].D = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_D.t7')
   end
   return GAN
 end
