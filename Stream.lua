@@ -141,7 +141,7 @@ function init_G()
   G:add(nn.SpatialFullConvolution(ngf, nc, 4, 4, 2, 2, 1, 1))
   G:add(nn.Tanh())
   G:apply(weights_init)
-  return G
+  return G:cuda()
 end
 
 function init_D()
@@ -164,7 +164,7 @@ function init_D()
   -- state size: 1 x 1 x 1
   D:add(nn.View(1):setNumInputDims(3))
   D:apply(weights_init)
-  return D
+  return D:cuda()
 end
 -------------------------------------------------------------------------------------------------------
 -- ACCESSING, GENERATING AND LOADING DATA
