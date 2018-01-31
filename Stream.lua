@@ -31,8 +31,10 @@ opt = {
   bufferSize = 50, -- Number of batches in the buffer
   gpu = 1,
   dropout = 0,
+  epoch_nb = 3,
   testing = 'real',
   continue_training = false,
+  init_pretrained = false,
   totalClasses = 10, -- Total nb of classes in stream, basically unknown but since we use static datasets as stream, let's say we know it... 
 }
 
@@ -84,6 +86,7 @@ function init_feature_extractor(path_to_fs)
 end
 
 -- DCGAN GENERATORS AND DISCRIMINATORS
+
 function load_pretrained_generators_LSUN(opt)
   local GAN = {} 
   -- Initialize all the models with some pretrained model (let's say bridge generator)
@@ -92,9 +95,12 @@ function load_pretrained_generators_LSUN(opt)
     if opt.continue_training then
       GAN[idx_model].G = torch.load('./models/progress/LSUN_generators/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_G.t7')
       GAN[idx_model].D = torch.load('./models/progress/LSUN_generators/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_D.t7')
-    else
+    elseif opt.init_pretrained == true then
       GAN[idx_model].G = torch.load('./models/LSUN_generators/pretrained/init_G.t7')
       GAN[idx_model].D = torch.load('./models/LSUN_generators/pretrained/init_D.t7')
+    else
+      GAN[idx_model].G = init_G()
+      GAN[idx_model].D = init_D()
     end
   end
   if opt.continue_training then return GAN end
@@ -106,6 +112,60 @@ function load_pretrained_generators_LSUN(opt)
   return GAN
 end
 
+function weights_init(m)
+   local name = torch.type(m)
+   if name:find('Convolution') then
+      m.weight:normal(0.0, 0.02)
+      m:noBias()
+   elseif name:find('BatchNormalization') then
+      if m.weight then m.weight:normal(1.0, 0.02) end
+      if m.bias then m.bias:fill(0) end
+   end
+end
+
+function init_G()
+  local G = nn.Sequential()
+  local ngf = 64; local nc = 3
+  G:add(nn.SpatialFullConvolution(100, ngf * 8, 4, 4))
+  G:add(nn.SpatialBatchNormalization(ngf * 8)):add(nn.ReLU(true))
+  -- state size: (ngf*8) x 4 x 4
+  G:add(nn.SpatialFullConvolution(ngf * 8, ngf * 4, 4, 4, 2, 2, 1, 1))
+  G:add(nn.SpatialBatchNormalization(ngf * 4)):add(nn.ReLU(true))
+  -- state size: (ngf*4) x 8 x 8
+  G:add(nn.SpatialFullConvolution(ngf * 4, ngf * 2, 4, 4, 2, 2, 1, 1))
+  G:add(nn.SpatialBatchNormalization(ngf * 2)):add(nn.ReLU(true))
+  -- state size: (ngf*2) x 16 x 16
+  G:add(nn.SpatialFullConvolution(ngf * 2, ngf, 4, 4, 2, 2, 1, 1))
+  G:add(nn.SpatialBatchNormalization(ngf)):add(nn.ReLU(true))
+  -- state size: (ngf) x 32 x 32
+  G:add(nn.SpatialFullConvolution(ngf, nc, 4, 4, 2, 2, 1, 1))
+  G:add(nn.Tanh())
+  G:apply(weights_init)
+  return G
+end
+
+function init_D()
+  local D = nn.Sequential()
+  local nc = 3; local ndf = 64
+  D:add(nn.SpatialConvolution(nc, ndf, 4, 4, 2, 2, 1, 1))
+  D:add(nn.LeakyReLU(0.2, true))
+  -- state size: (ndf) x 32 x 32
+  D:add(nn.SpatialConvolution(ndf, ndf * 2, 4, 4, 2, 2, 1, 1))
+  D:add(nn.SpatialBatchNormalization(ndf * 2)):add(nn.LeakyReLU(0.2, true))
+  -- state size: (ndf*2) x 16 x 16
+  D:add(nn.SpatialConvolution(ndf * 2, ndf * 4, 4, 4, 2, 2, 1, 1))
+  D:add(nn.SpatialBatchNormalization(ndf * 4)):add(nn.LeakyReLU(0.2, true))
+  -- state size: (ndf*4) x 8 x 8
+  D:add(nn.SpatialConvolution(ndf * 4, ndf * 8, 4, 4, 2, 2, 1, 1))
+  D:add(nn.SpatialBatchNormalization(ndf * 8)):add(nn.LeakyReLU(0.2, true))
+  -- state size: (ndf*8) x 4 x 4
+  D:add(nn.SpatialConvolution(ndf * 8, 1, 4, 4))
+  D:add(nn.Sigmoid())
+  -- state size: 1 x 1 x 1
+  D:add(nn.View(1):setNumInputDims(3))
+  D:apply(weights_init)
+  return D
+end
 -------------------------------------------------------------------------------------------------------
 -- ACCESSING, GENERATING AND LOADING DATA
 -------------------------------------------------------------------------------------------------------
@@ -362,6 +422,7 @@ local GAN_count = torch.zeros(10); local buffer_count = torch.zeros(10)
 
 local Stream = true
 local classes = torch.FloatTensor(opt.pretrainedClasses);  -- Initializing classes to the start of the stream
+-- Parameters for the training step zero:
 
 buffer, buffer_count = init_buffer(opt)
 
@@ -412,8 +473,23 @@ p, gp = C_model:getParameters()
 --res = complete_buffer(buffer, buffer_count, GAN, feature_extractor, opt)
 --print('Test complete, please check res')
 
+-- Step zero: Testing on just pretrained GANs for initial classes:
+opt_zero = opt; opt_zero.bufferSize = opt.bufferSize*10;
+buffer_zero, buffer_count_zero = init_buffer(opt_zero)
+buffer_zero = complete_buffer(buffer_zero, buffer_count_zero, GAN, feature_extractor, opt_zero)
+for epoch = 1, opt.epoch_nb do
+  C_model = train_classifier(C_model, buffer_zero, opt_zero)
+end
 to_save = {}
 to_save.confusion = {}
+to_save.GAN_count = {}
+to_save.intervals = {}
+to_save.intervals.lenght = {}
+to_save.intervals.classes = {}
+to_save.confusion[0] = test_classifier(C_model, testset); print(to_save.confusion[0])
+to_save.GAN_count[0] = torch.zeros(10)
+to_save.intervals.duration[0] = 0
+to_save.intervals.classes[0] = classes
 while Stream do
   collectgarbage()
   if interval_is_over == true then 
@@ -421,6 +497,8 @@ while Stream do
     interval_idx = interval_idx + 1
 --    classes = get_new_classes(classes, opt) -- getting classes that would appear in the new interval
     interval, classes = get_new_interval(classes, opt) -- fill in the interval with ordered classes of batches from stream
+    to_save.intervals.duration[interval_idx] = inteval:size(1)
+    to_save.intervals.classes[interval_idx] = classes
     print('New classes: '); print(classes:reshape(1,classes:size(1)))
     batch_idx = 1
     interval_is_over = false
@@ -442,7 +520,9 @@ while Stream do
     print('Collected enough data. Samples distribution by class: '); print(buffer_count:reshape(1,10)) 
     buffer = complete_buffer(buffer, buffer_count, GAN, feature_extractor, opt)
     print('Training clasifier with collected data')
-    C_model = train_classifier(C_model, buffer, opt)
+    for epoch = 1, opt.epoch_nb do
+      C_model = train_classifier(C_model, buffer, opt)
+    end
     buffer, buffer_count = init_buffer(opt)
   end
   if batch_idx == interval:size(1) then 
@@ -450,10 +530,11 @@ while Stream do
     print('Currently real images fed to GANS, per class: '); print(GAN_count:reshape(1, 10)*opt.batchSize)
     confusion = test_classifier(C_model, testset); print(confusion)
     to_save.confusion[interval_idx] = confusion
-    to_save.GAN_count = GAN_count
+    to_save.GAN_count[interval_idx] = GAN_count
     torch.save('./results/LSUN/stream/confusions.t7', to_save)
     if interval_idx%10==0 then
       torch.save('./models/progress/LSUN_generators/interval_' .. interval_idx .. '_DCGAN.t7', GAN)
+      torch.save('./models/progress/LSUN_stream_classifier.t7', C_model)
     end
   end
 end
