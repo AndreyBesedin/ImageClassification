@@ -104,8 +104,8 @@ function load_pretrained_generators_LSUN(opt)
   if opt.continue_training then return GAN end
   -- Replace chosen classes with respective pretrained models
   for idx_model = 1, #opt.pretrainedClasses do
-    GAN[idx_model].G = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_G.t7')
-    GAN[idx_model].D = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_D.t7')
+    GAN[opt.pretrainedClasses[idx_model]].G = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_G.t7')
+    GAN[opt.pretrainedClasses[idx_model]].D = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_D.t7')
   end
   return GAN
 end
@@ -139,7 +139,7 @@ function init_G()
   G:add(nn.SpatialFullConvolution(ngf, nc, 4, 4, 2, 2, 1, 1))
   G:add(nn.Tanh())
   G:apply(weights_init)
-  return G
+  return G:cuda()
 end
 
 function init_D()
@@ -162,7 +162,7 @@ function init_D()
   -- state size: 1 x 1 x 1
   D:add(nn.View(1):setNumInputDims(3))
   D:apply(weights_init)
-  return D
+  return D:cuda()
 end
 -------------------------------------------------------------------------------------------------------
 -- ACCESSING, GENERATING AND LOADING DATA
@@ -434,7 +434,7 @@ config = {
 ---------------------------------------------------------------------------------------------------------
 
 print('\nLOADING THE TESTSET')
-path_to_testset = './subsets/full/testset_5k_per_class_1.t7'
+path_to_testset = './subsets/full/testset_5k_per_class_2.t7'
 testset = torch.load(path_to_testset)
 print('\nTESTSET LOADED, SIZE: ' .. testset.data:size(1)); 
 
@@ -460,15 +460,15 @@ p, gp = C_model:getParameters()
 to_save = {}
 buffer, buffer_count = init_buffer(opt)
 idx_buffer = 0
-while Stream do
+while idx_buffer <=1002 do
   collectgarbage() 
   buffer = complete_buffer(buffer, buffer_count, GAN, feature_extractor, opt)
-  C_model = train_classifier(C_model, buffer, opt)
+  for epoch = 1, 10 do
+    C_model = train_classifier(C_model, buffer, opt)
+  end
   idx_buffer = idx_buffer + 1
   buffer, buffer_count = init_buffer(opt)
-  if batch_idx_buffer % 10 == then 
-    confusion = test_classifier(C_model, testset); print(confusion)
-    to_save[idx_buffer] = confusion
-    torch.save('./results/LSUN/stream/confusions_zero.t7', to_save)
-  end
+  confusion = test_classifier(C_model, testset); print(confusion)
+  to_save[idx_buffer] = confusion
+  torch.save('./results/LSUN/stream/confusions_zero.t7', to_save)
 end
