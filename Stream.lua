@@ -17,7 +17,7 @@ dofile('./tools/tools.lua')
 -- ADVANCED OPTIONS FOR TRAINING
 -------------------------------------------------------------------------------------------------------
 opt = {
-  lr = 0.001,
+  lr = 0.0005,
   nThreads = 6,
   initClassNb = 4, -- Number of already pretrained classes in the model
   pretrainedClasses = {2, 3, 4, 5},
@@ -56,6 +56,20 @@ torch.setnumthreads(1)
 torch.setdefaulttensortype('torch.FloatTensor')
 cutorch.setDevice(1)
 
+function deepcopy(orig)
+  local orig_type = type(orig)
+  local copy
+  if orig_type == 'table' then
+    copy = {}
+    for orig_key, orig_value in next, orig, nil do
+      copy[deepcopy(orig_key)] = deepcopy(orig_value)
+    end
+    setmetatable(copy, deepcopy(getmetatable(orig)))
+  else -- number, string, boolean, etc
+    copy = orig
+  end
+return copy
+end
 -------------------------------------------------------------------------------------------------------
 -- FUNCTIONS TO INITIALIZE/LOAD MODELS
 -------------------------------------------------------------------------------------------------------
@@ -439,10 +453,12 @@ for idx = 1, 10 do
 end
 optimState = {
   learningRate = opt.lr,
+  weightDecay = 1e-4,
 }
 
 config = {
   learningRate = opt.lr,
+  weightDecay = 1e-4,
 }
 
 ---------------------------------------------------------------------------------------------------------
@@ -474,17 +490,17 @@ p, gp = C_model:getParameters()
 --print('Test complete, please check res')
 
 -- Step zero: Testing on just pretrained GANs for initial classes:
-opt_zero = opt; opt_zero.bufferSize = opt.bufferSize*10;
+opt_zero = deepcopy(opt); opt_zero.bufferSize = opt.bufferSize*5;
 buffer_zero, buffer_count_zero = init_buffer(opt_zero)
 buffer_zero = complete_buffer(buffer_zero, buffer_count_zero, GAN, feature_extractor, opt_zero)
-for epoch = 1, opt.epoch_nb do
+for epoch = 1, 1 do
   C_model = train_classifier(C_model, buffer_zero, opt_zero)
 end
 to_save = {}
 to_save.confusion = {}
 to_save.GAN_count = {}
 to_save.intervals = {}
-to_save.intervals.lenght = {}
+to_save.intervals.duration = {}
 to_save.intervals.classes = {}
 to_save.confusion[0] = test_classifier(C_model, testset); print(to_save.confusion[0])
 to_save.GAN_count[0] = torch.zeros(10)
@@ -497,7 +513,7 @@ while Stream do
     interval_idx = interval_idx + 1
 --    classes = get_new_classes(classes, opt) -- getting classes that would appear in the new interval
     interval, classes = get_new_interval(classes, opt) -- fill in the interval with ordered classes of batches from stream
-    to_save.intervals.duration[interval_idx] = inteval:size(1)
+    to_save.intervals.duration[interval_idx] = interval:size(1)
     to_save.intervals.classes[interval_idx] = classes
     print('New classes: '); print(classes:reshape(1,classes:size(1)))
     batch_idx = 1
