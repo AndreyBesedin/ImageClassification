@@ -563,7 +563,7 @@ while Stream do
   local current_class = interval[batch_idx]
   batch_idx = batch_idx + 1
   if indices[current_class]:size(1) <= opt.batchSize then
-    indices[current_class] = torch.randperm(trainset_class:size(1))
+    indices[current_class] = torch.randperm(trainset_class[current_class]:size(1))
   end
   indices_batch = indices[current_class][{{1,opt.batchSize}}]
   indices[current_class] = indices[current_class][{{opt.batchSize+1, indices[current_class]:size(1)}}]
