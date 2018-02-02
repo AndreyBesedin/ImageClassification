@@ -567,6 +567,7 @@ while Stream do
   end
   indices_batch = indices[current_class][{{1,opt.batchSize}}]
   indices[current_class] = indices[current_class][{{opt.batchSize+1, indices[current_class]:size(1)}}]
+  print(indices[curren_class]:size())
   batch_orig = trainset_class[current_class]:index(1, indices_batch:long())
   batch = rescale_3D_batch(batch_orig:float(), 64)
   --print('RECEIVED DATA FROM CLASS ' .. current_class)
