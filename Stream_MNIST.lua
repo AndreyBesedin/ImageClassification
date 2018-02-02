@@ -523,14 +523,14 @@ if opt.train_batch_real then
 end
 
 function generate_image_grid(GAN, visu_noise)
-  local im_full = torch.FloatTensor(1, 640,640):cuda()
+  local im_full = torch.FloatTensor(640,640):cuda()
   for idx_class = 1, 10 do
     gen_images = GAN[idx_class].G:forward(visu_noise:cuda())
     for idx_im = 1, 10 do
-      im_full[{{},{1+64*(idx_im-1), 64*idx_im},{1+64*(idx_class - 1), 64*idx_class}}]=gen_images[idx_im]:float()
+      im_full[{{1+64*(idx_im-1), 64*idx_im},{1+64*(idx_class - 1), 64*idx_class}}]=gen_images[idx_im]:squeeze():float()
     end
   end
-  return im_full
+  return (im_full+1)/2
 end
 to_save = {}
 to_save.confusion = {}
@@ -591,7 +591,8 @@ while Stream do
     interval_is_over = true
     print('Currently real images fed to GANS, per class: '); print(GAN_count:reshape(1, 10)*opt.batchSize)
     confusion = test_classifier(C_model, testset); print(confusion)
-    torch.save('./results/MNIST/image_grids/interval_' .. interval_idx .. '.png', generate_image_grid(GAN, visu_noise))
+    im_to_save = generate_image_grid(GAN, visu_noise)
+    torch.save('./results/MNIST/image_grids/interval_' .. interval_idx .. '.png', im_to_save)
     to_save.confusion[interval_idx] = confusion
     to_save.GAN_count[interval_idx] = GAN_count
     torch.save('./results/MNIST/stream/confusions.t7', to_save)
