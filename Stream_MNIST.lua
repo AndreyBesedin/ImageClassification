@@ -33,14 +33,14 @@ opt = {
   testing = 'real',
   continue_training = false,
   init_pretrained = false,
-  totalClasses = 20, -- Total nb of classes in stream, basically unknown but since we use static datasets as stream, let's say we know it... 
+  totalClasses = 10, -- Total nb of classes in stream, basically unknown but since we use static datasets as stream, let's say we know it... 
   generatedOnly = true,
   train_batch_fake = false,
   train_batch_real = false,
 }
 
 -- Full list of available classes
-local data_classes = {'one', 'two', 'three', 'four', 
+data_classes = {'one', 'two', 'three', 'four', 
                       'five', 'six', 'seven', 'eight', 'nine', 'zero'}                      
 -------------------------------------------------------------------------------------------------------
 -- MODIFYING OPTIONS
@@ -437,11 +437,11 @@ end
 -- INITIALIZING TRAINING AND PARAMETERS
 ---------------------------------------------------------------------------------------------------------
         
-local interval_is_over = true; local interval_idx = 0
-local GAN_count = torch.zeros(10); local buffer_count = torch.zeros(10)
+ interval_is_over = true; interval_idx = 0
+GAN_count = torch.zeros(10); buffer_count = torch.zeros(10)
 
-local Stream = false
-local classes = torch.FloatTensor(opt.pretrainedClasses);  -- Initializing classes to the start of the stream
+Stream = true
+classes = torch.FloatTensor(opt.pretrainedClasses);  -- Initializing classes to the start of the stream
 -- Parameters for the training step zero:
 
 --buffer, buffer_count = init_buffer(opt)
@@ -450,7 +450,7 @@ classif_criterion = nn.ClassNLLCriterion()
 GAN_criterion = nn.BCECriterion()
 GAN_criterion = GAN_criterion:cuda()
 
-local test_res = {}
+test_res = {}
 optimState_GAN = {}
 for idx = 1, 10 do
   optimState_GAN[idx]= {}
@@ -475,6 +475,7 @@ print('\nTESTSET LOADED, SIZE: ' .. testset.data:size(1));
 path_to_trainset = '/home/besedin/workspace/Data/MNIST/t7_files/trainset.t7'
 trainset = torch.load(path_to_trainset)
 trainset_class = trainset_by_class(trainset) 
+print('\nTRAINSET LOADED, SIZE: ' .. trainset.data:size(1));
 ---------------------------------------------------------------------------------------------------------
 -- INITIALIZING MODELS
 ---------------------------------------------------------------------------------------------------------
@@ -553,7 +554,7 @@ buffer, buffer_count = init_buffer(opt)
 visu_noise = torch.FloatTensor(10, 100, 1, 1); visu_noise = visu_noise:normal(0,1); visu_noise =visu_noise:cuda()
 
 indices = {}
-for idx = 1, 10 do indices[idx]= torch.randperm(trainset_class[idx]:size(1)) end
+for idx = 1, 10 do indices[idx]= torch.randperm(trainset_class[idx]:size(1)):float() end
 while Stream do
   collectgarbage()
   if interval_is_over == true then 
