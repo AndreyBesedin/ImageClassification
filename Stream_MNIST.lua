@@ -200,12 +200,21 @@ function rescale_3D_batch(batch, outSize)
   end
   return new_batch:float()
 end
+
 function trainset_by_class(trainset)
   local indices = torch.ones(10):float()
   local res = {} 
+  local res_ = {}
   for idx = 1, 10 do res[idx] = {}; end
   for idx = 1, trainset.data:size(1) do
-    res[trainset.labels[idx]][indices[trainset.labels[idx]]] = trainset.data[trainset.labels[idx]]
+    res[trainset.labels[idx]][indices[trainset.labels[idx]]] = trainset.data[idx]
+    indices[trainset.labels[idx]] = indices[trainset.labels[idx]] +1
+  end
+  for idx = 1, 10 do
+    res_[idx] = torch.cat(res[idx],1):reshape(#res[idx], 1, 28, 28)
+  end
+  return res_
+end
 ---------------------------------------------------------------------------------------------------------
 -- FUNCTION TO FORM THE STREAM 
 ---------------------------------------------------------------------------------------------------------
@@ -302,7 +311,7 @@ end
 function train_GAN(GAN, data, optimState_)  
   parametersD, gradParametersD = GAN.D:getParameters()
   parametersG, gradParametersG = GAN.G:getParameters()
-  input = torch.CudaTensor(opt.batchSize, 3, 64, 64)
+  input = torch.CudaTensor(opt.batchSize, 1, 64, 64)
   noise = torch.CudaTensor(opt.batchSize, 100, 1, 1)
   label = torch.CudaTensor(opt.batchSize)
   local fDx = function(x)
@@ -315,40 +324,32 @@ function train_GAN(GAN, data, optimState_)
     local errD_real = GAN_criterion:forward(output, label)
     local df_do = GAN_criterion:backward(output, label)
     GAN.D:backward(input, df_do)
-
     -- train with fake
     noise:normal(0, 1)
     local fake = GAN.G:forward(noise)
     input:copy(fake)
     label:fill(0)
-
     local output = GAN.D:forward(input)
     local errD_fake = GAN_criterion:forward(output, label)
     local df_do = GAN_criterion:backward(output, label)
     GAN.D:backward(input, df_do)
-
     errD = errD_real + errD_fake
     return errD, gradParametersD
-  end
-  
+  end  
   local fGx = function(x)
     gradParametersG:zero()
-
     --[[ the three lines below were already executed in fDx, so save computation
     noise:uniform(-1, 1) -- regenerate random noise
     local fake = netG:forward(noise)
     input:copy(fake) ]]--
     label:fill(1) -- fake labels are real for generator cost
-
     local output = GAN.D.output -- netD:forward(input) was already executed in fDx, so save computation
     errG = GAN_criterion:forward(output, label)
     local df_do = GAN_criterion:backward(output, label)
     local df_dg = GAN.D:updateGradInput(input, df_do)
-
     GAN.G:backward(noise, df_dg)
     return errG, gradParametersG
   end
-
   optim.adam(fDx, parametersD, optimState_.D)
   optim.adam(fGx, parametersG, optimState_.G)
   parametersD, gradParametersD = nil, nil -- nil them to avoid spiking memory
@@ -371,7 +372,6 @@ function train_classifier(C_model, data, opt)
     confusion_train:batchAdd(y_max:squeeze():float(), label:float())
     return errM, gp
   end
-  
   input = torch.CudaTensor(opt.batchSize, 1, 28, 28)
   label = torch.CudaTensor(opt.batchSize)
   criterion = classif_criterion:cuda()
@@ -389,7 +389,7 @@ function train_classifier(C_model, data, opt)
     optim.adam(fx, p, config, optimState)
     --C_model:clearState()
     p, gp = C_model:getParameters()
-    if i%450==0 then idx_test = idx_test + 1; confusion_test_[idx_test] = test_classifier(C_model, testset); print(confusion_test_[idx_test]) end
+--    if i%450==0 then idx_test = idx_test + 1; confusion_test_[idx_test] = test_classifier(C_model, testset); print(confusion_test_[idx_test]) end
   end
   print('Training set confusion matrix: ')
   print(confusion_train)
@@ -401,6 +401,19 @@ function getBatch(data, indices)
   batch.data = data.data:index(1, indices:long())
   batch.labels = data.labels:index(1, indices:long())
   return batch
+end
+
+function getBatchFromTrainset(trainset_class, indices, opt)
+  if indices:size(1) == opt.batchSize then
+    batch = trainset_class:index(1, indices[{{1, opt.batchSize}}]:long())
+    indices = torch.randperm(trainset_class:size(1))
+    return batch, indices
+  elseif indices:size(1) < opt.batchSize then
+    indices = torch.randperm(trainset_class:size(1))
+  end
+  batch = trainset_class:index(1, indices[{{1, opt.batchSize}}]:long())
+  indices = indices[{{opt.batchSize+1, indices:size(1)}}]
+  return batch, indices
 end
 
 function test_classifier(C_model, data)
@@ -461,6 +474,7 @@ testset = torch.load(path_to_testset)
 print('\nTESTSET LOADED, SIZE: ' .. testset.data:size(1)); 
 path_to_trainset = '/home/besedin/workspace/Data/MNIST/t7_files/trainset.t7'
 trainset = torch.load(path_to_trainset)
+trainset_class = trainset_by_class(trainset) 
 ---------------------------------------------------------------------------------------------------------
 -- INITIALIZING MODELS
 ---------------------------------------------------------------------------------------------------------
@@ -514,6 +528,17 @@ if opt.train_batch_real then
   --  print('optim state: '); print(optimState) 
   end
 end
+
+function generate_image_grid(GAN, visu_noise)
+  local im_full = torch.FloatTensor(1, 640,640):cuda()
+  for idx_class = 1, 10 do
+    gen_images = GAN[idx_class].G:forward(visu_noise:cuda())
+    for idx_im = 1, 10 do
+      im_full[{{},{1+64*(idx_im-1), 64*idx_im},{1+64*(idx_class - 1), 64*idx_class}}]=gen_images[idx_im]:float()
+    end
+  end
+  return im_full
+end
 to_save = {}
 to_save.confusion = {}
 to_save.GAN_count = {}
@@ -525,7 +550,10 @@ to_save.GAN_count[0] = torch.zeros(10)
 to_save.intervals.duration[0] = 0
 to_save.intervals.classes[0] = classes
 buffer, buffer_count = init_buffer(opt)
+visu_noise = torch.FloatTensor(10, 100, 1, 1); visu_noise = visu_noise:normal(0,1); visu_noise =visu_noise:cuda()
 
+indices = {}
+for idx = 1, 10 do indices[idx]= torch.randperm(trainset_class[idx]:size(1)) end
 while Stream do
   collectgarbage()
   if interval_is_over == true then 
@@ -541,20 +569,20 @@ while Stream do
   end 
   local current_class = interval[batch_idx]
   batch_idx = batch_idx + 1
-  batch_orig = DATA[current_class]:getBatch(opt.batchSize)
-  --print('RECEIVED DATA FROM CLASS ' .. current_class)
-  GAN[current_class], errD, errG = train_GAN(GAN[current_class], rescale_3D_batch(batch_orig:float(), 64), optimState_GAN[current_class])
-  print('Class ' .. current_class .. ', errD = ' .. errD .. ', errG = ' .. errG)
-  local batch_features = feature_extractor:forward(batch_orig:cuda())
   
+  batch_orig, indices[current_class] = getBatchFromTrainset(trainset_class[current_class], indices[current_class], opt)
+  batch = rescale_3D_batch(batch_orig:float(), 64)
+  --print('RECEIVED DATA FROM CLASS ' .. current_class)
+  GAN[current_class], errD, errG = train_GAN(GAN[current_class], batch, optimState_GAN[current_class])
+  --print('Class ' .. current_class .. ', errD = ' .. errD .. ', errG = ' .. errG)
   -- Filling in the buffer
   buffer_count[current_class] = buffer_count[current_class] + 1
   xlua.progress(buffer_count:sum(), opt.bufferSize*classes:size(1))
   GAN_count[current_class] = GAN_count[current_class] + 1
-  buffer[{{current_class},{1 + (buffer_count[current_class]-1)*opt.batchSize, buffer_count[current_class]*opt.batchSize},{}}] = batch_features:float()
+  buffer[{{current_class},{1 + (buffer_count[current_class]-1)*opt.batchSize, buffer_count[current_class]*opt.batchSize},{},{},{}}] = batch_orig:float()
   if buffer_count[current_class] == opt.bufferSize then
     print('Collected enough data. Samples distribution by class: '); print(buffer_count:reshape(1,10)) 
-    buffer = complete_buffer(buffer, buffer_count, GAN, feature_extractor, opt)
+    buffer = complete_buffer(buffer, buffer_count, GAN, opt)
     print('Training clasifier with collected data')
     for epoch = 1, opt.epoch_nb do
       C_model = train_classifier(C_model, buffer, opt)
@@ -565,12 +593,13 @@ while Stream do
     interval_is_over = true
     print('Currently real images fed to GANS, per class: '); print(GAN_count:reshape(1, 10)*opt.batchSize)
     confusion = test_classifier(C_model, testset); print(confusion)
+    torch.save('./results/MNIST/image_grids/interval_' .. interval_idx .. '.png', generate_image_grid(GAN, visu_noise))
     to_save.confusion[interval_idx] = confusion
     to_save.GAN_count[interval_idx] = GAN_count
-    torch.save('./results/LSUN/stream/confusions.t7', to_save)
+    torch.save('./results/MNIST/stream/confusions.t7', to_save)
     if interval_idx%10==0 then
-      torch.save('./models/progress/LSUN_generators/interval_' .. interval_idx .. '_DCGAN.t7', GAN)
-      torch.save('./models/progress/LSUN_stream_classifier.t7', C_model)
+      torch.save('./models/progress/MNIST_generators/interval_' .. interval_idx .. '_DCGAN.t7', GAN)
+      torch.save('./models/progress/MNIST_stream_classifier.t7', C_model)
     end
   end
 end
