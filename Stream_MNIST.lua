@@ -202,13 +202,13 @@ function rescale_3D_batch(batch, outSize)
 end
 
 function trainset_by_class(trainset)
-  local indices = torch.ones(10):float()
+  local indices_ = torch.ones(10):float()
   local res = {} 
   local res_ = {}
   for idx = 1, 10 do res[idx] = {}; end
   for idx = 1, trainset.data:size(1) do
-    res[trainset.labels[idx]][indices[trainset.labels[idx]]] = trainset.data[idx]
-    indices[trainset.labels[idx]] = indices[trainset.labels[idx]] +1
+    res[trainset.labels[idx]][indices_[trainset.labels[idx]]] = trainset.data[idx]
+    indices_[trainset.labels[idx]] = indices_[trainset.labels[idx]] +1
   end
   for idx = 1, 10 do
     res_[idx] = torch.cat(res[idx],1):reshape(#res[idx], 1, 28, 28)
@@ -382,8 +382,8 @@ function train_classifier(C_model, data, opt)
   confusion_test_ = {}
   for i = 1, math.floor(data.data:size(1)/opt.batchSize) do 
     xlua.progress(i, math.floor(data.data:size(1)/opt.batchSize))
-    indices = indices_rand[{{1+(i-1)*opt.batchSize, i*opt.batchSize}}]
-    batch = getBatch(data, indices:long())
+    indices_ = indices_rand[{{1+(i-1)*opt.batchSize, i*opt.batchSize}}]
+    batch = getBatch(data, indices_:long())
     input:copy(batch.data)
     label:copy(batch.labels)
     optim.adam(fx, p, config, optimState)
@@ -396,15 +396,15 @@ function train_classifier(C_model, data, opt)
   return C_model, confusion_test_
 end
 
-function getBatch(data, indices)
+function getBatch(data, indices_)
   local batch = {}
-  batch.data = data.data:index(1, indices:long())
-  batch.labels = data.labels:index(1, indices:long())
+  batch.data = data.data:index(1, indices_:long())
+  batch.labels = data.labels:index(1, indices_:long())
   return batch
 end
 
-function getBatchFromTrainset(trainset_class, indices)
-  batch = trainset_class:index(1, indices:long())
+function getBatchFromTrainset(trainset_class, indices_)
+  batch = trainset_class:index(1, indices_:long())
   return batch
 end
 
@@ -414,8 +414,8 @@ function test_classifier(C_model, data)
   confusion:zero()
   for idx = 1, data.data:size(1), opt.batchSize do
     --xlua.progress(idx, opt.testSize)
-    indices = torch.range(idx, math.min(idx + opt.batchSize, data.data:size(1)))
-    local batch = getBatch(data, indices:long())
+    indices_ = torch.range(idx, math.min(idx + opt.batchSize, data.data:size(1)))
+    local batch = getBatch(data, indices_:long())
     local y = C_model:forward(batch.data:cuda())
     y = y:float()
     _, y_max = y:max(2)
@@ -567,7 +567,7 @@ while Stream do
   end
   indices_batch = indices[current_class][{{1,opt.batchSize}}]
   indices[current_class] = indices[current_class][{{opt.batchSize+1, indices[current_class]:size(1)}}]
-  print(indices[curren_class]:size())
+  --print(indices[current_class]:size())
   batch_orig = trainset_class[current_class]:index(1, indices_batch:long())
   batch = rescale_3D_batch(batch_orig:float(), 64)
   --print('RECEIVED DATA FROM CLASS ' .. current_class)
