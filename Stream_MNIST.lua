@@ -24,12 +24,12 @@ opt = {
   maxClassNb = 5,      -- Maximum nb of classes in any stream interval
   usePretrainedModels = true,
   imSize = 28,
-  batchSize = 32,
+  batchSize = 16,
   interval_size = {300, 400},
   bufferSize = 50, -- Number of batches in the buffer
   gpu = 1,
   dropout = 0,
-  epoch_nb = 10,
+  epoch_nb = 2,
   testing = 'real',
   continue_training = false,
   init_pretrained = false,
@@ -566,7 +566,7 @@ while Stream do
     indices[current_class] = torch.randperm(trainset_class:size(1))
   end
   indices_batch = indices[current_class][{{1,opt.batchSize}}]
-  indices[current_class] = indices[current_class][{{opt.batchSize+1, trainset_class[current_class]:size(1)}}]
+  indices[current_class] = indices[current_class][{{opt.batchSize+1, indices[current_class]:size(1)}}]
   batch_orig = trainset_class[current_class]:index(1, indices_batch:long())
   batch = rescale_3D_batch(batch_orig:float(), 64)
   --print('RECEIVED DATA FROM CLASS ' .. current_class)
