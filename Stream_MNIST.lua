@@ -593,6 +593,7 @@ while Stream do
     confusion = test_classifier(C_model, testset); print(confusion)
     im_to_save = generate_image_grid(GAN, visu_noise)
     torch.save('./results/MNIST/image_grids/interval_' .. interval_idx .. '.png', im_to_save)
+    torch.save('./results/MNIST/image_grids/last.png', im_to_save)
     to_save.confusion[interval_idx] = confusion
     to_save.GAN_count[interval_idx] = GAN_count
     torch.save('./results/MNIST/stream/confusions.t7', to_save)
