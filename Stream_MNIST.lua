@@ -200,6 +200,12 @@ function rescale_3D_batch(batch, outSize)
   end
   return new_batch:float()
 end
+function trainset_by_class(trainset)
+  local indices = torch.ones(10):float()
+  local res = {} 
+  for idx = 1, 10 do res[idx] = {}; end
+  for idx = 1, trainset.data:size(1) do
+    res[trainset.labels[idx]][indices[trainset.labels[idx]]] = trainset.data[trainset.labels[idx]]
 ---------------------------------------------------------------------------------------------------------
 -- FUNCTION TO FORM THE STREAM 
 ---------------------------------------------------------------------------------------------------------
