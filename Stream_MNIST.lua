@@ -403,17 +403,9 @@ function getBatch(data, indices)
   return batch
 end
 
-function getBatchFromTrainset(trainset_class, indices, opt)
-  if indices:size(1) == opt.batchSize then
-    batch = trainset_class:index(1, indices[{{1, opt.batchSize}}]:long())
-    indices = torch.randperm(trainset_class:size(1))
-    return batch, indices
-  elseif indices:size(1) < opt.batchSize then
-    indices = torch.randperm(trainset_class:size(1))
-  end
-  batch = trainset_class:index(1, indices[{{1, opt.batchSize}}]:long())
-  indices = indices[{{opt.batchSize+1, indices:size(1)}}]
-  return batch, indices
+function getBatchFromTrainset(trainset_class, indices)
+  batch = trainset_class:index(1, indices:long())
+  return batch
 end
 
 function test_classifier(C_model, data)
@@ -570,8 +562,12 @@ while Stream do
   end 
   local current_class = interval[batch_idx]
   batch_idx = batch_idx + 1
-  
-  batch_orig, indices[current_class] = getBatchFromTrainset(trainset_class[current_class], indices[current_class], opt)
+  if indices[current_class]:size(1) <= opt.batchSize then
+    indices[current_class] = torch.randperm(trainset_class:size(1))
+  end
+  indices_batch = indices[current_class][{{1,opt.batchSize}}]
+  indices[current_class] = indices[current_class][{{opt.batchSize+1, trainset_class[current_class]:size(1)}}]
+  batch_orig = trainset_class[current_class]:index(1, indices_batch:long())
   batch = rescale_3D_batch(batch_orig:float(), 64)
   --print('RECEIVED DATA FROM CLASS ' .. current_class)
   GAN[current_class], errD, errG = train_GAN(GAN[current_class], batch, optimState_GAN[current_class])
