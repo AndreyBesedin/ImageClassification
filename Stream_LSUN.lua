@@ -37,7 +37,7 @@ opt = {
   continue_training = false,
   init_pretrained = false,
   train_batch_fake = false,
-  train_batch_real = true,
+  train_batch_real = false,
   totalClasses = 10, -- Total nb of classes in stream, basically unknown but since we use static datasets as stream, let's say we know it... 
 }
 
@@ -439,7 +439,7 @@ end
 -- INITIALIZING TRAINING AND PARAMETERS
 ---------------------------------------------------------------------------------------------------------
         
---if not DATA then DATA = initialize_loaders(opt) end
+if not DATA then DATA = initialize_loaders(opt) end
 interval_is_over = true; interval_idx = 0
 GAN_count = torch.zeros(10); buffer_count = torch.zeros(10)
 
@@ -539,12 +539,12 @@ function generate_image_grid(GAN, visu_noise)
   return (im_full+1)/2
 end
 
-opt_zero = deepcopy(opt); opt_zero.bufferSize = opt.bufferSize*5;
-buffer_zero, buffer_count_zero = init_buffer(opt_zero)
-buffer_zero = complete_buffer(buffer_zero, buffer_count_zero, GAN, feature_extractor, opt_zero)
-for epoch = 1, 1 do
-  C_model = train_classifier(C_model, buffer_zero, opt_zero)
-end
+--opt_zero = deepcopy(opt); opt_zero.bufferSize = opt.bufferSize*5;
+--buffer_zero, buffer_count_zero = init_buffer(opt_zero)
+--buffer_zero = complete_buffer(buffer_zero, buffer_count_zero, GAN, feature_extractor, opt_zero)
+--for epoch = 1, 1 do
+--  C_model = train_classifier(C_model, buffer_zero, opt_zero)
+--end
 to_save = {}
 to_save.confusion = {}
 to_save.GAN_count = {}
