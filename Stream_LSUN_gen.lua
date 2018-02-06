@@ -29,10 +29,10 @@ opt = {
   loadSize = 256,
   fineSize = 224,
   interval_size = {300, 400},
-  bufferSize = 50, -- Number of batches in the buffer
+  bufferSize = 200, -- Number of batches in the buffer
   gpu = 1,
   dropout = 0,
-  epoch_nb = 2,
+  epoch_nb = 5,
   testing = 'real',
   continue_training = false,
   init_pretrained = false,
@@ -81,7 +81,7 @@ end
 function init_classifier_LSUN(inSize, nbClasses, opt)
    -- Defining classification model 
   if opt.continue_training then
-    local C = torch.load('./models/progress/LSUN_classifier.t7')
+    local C = torch.load('./models/progress/LSUN_stream_classifier_gen.t7')
     return C
   end
   local C = nn.Sequential(); 
@@ -110,8 +110,8 @@ function load_pretrained_generators_LSUN(opt)
   for idx_model = 1, #opt.full_data_classes do
     GAN[idx_model] = {}
     if opt.continue_training then
-      GAN[idx_model].G = torch.load('./models/progress/LSUN_generators/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_G.t7')
-      GAN[idx_model].D = torch.load('./models/progress/LSUN_generators/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_D.t7')
+      GAN[idx_model].G = torch.load('./models/progress/LSUN_generators_gen/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_G.t7')
+      GAN[idx_model].D = torch.load('./models/progress/LSUN_generators_gen/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_D.t7')
     elseif opt.init_pretrained == true then
       GAN[idx_model].G = torch.load('./models/LSUN_generators/pretrained/init_G.t7')
       GAN[idx_model].D = torch.load('./models/LSUN_generators/pretrained/init_D.t7')
@@ -575,35 +575,32 @@ while Stream do
   --print('RECEIVED DATA FROM CLASS ' .. current_class)
   GAN[current_class], errD, errG = train_GAN(GAN[current_class], rescale_3D_batch(batch_orig:float(), 64), optimState_GAN[current_class])
   print('Class ' .. current_class .. ', errD = ' .. errD .. ', errG = ' .. errG)
-  local batch_features = feature_extractor:forward(batch_orig:cuda())
+  --local batch_features = feature_extractor:forward(batch_orig:cuda())
   
   -- Filling in the buffer
-  buffer_count[current_class] = buffer_count[current_class] + 1
-  xlua.progress(buffer_count:sum(), opt.bufferSize*classes:size(1))
+  --buffer_count[current_class] = buffer_count[current_class] + 1
+  xlua.progress(batch_idx, interval:size(1))
   GAN_count[current_class] = GAN_count[current_class] + 1
-  buffer[{{current_class},{1 + (buffer_count[current_class]-1)*opt.batchSize, buffer_count[current_class]*opt.batchSize},{}}] = batch_features:float()
-  if buffer_count[current_class] == opt.bufferSize then
+  --buffer[{{current_class},{1 + (buffer_count[current_class]-1)*opt.batchSize, buffer_count[current_class]*opt.batchSize},{}}] = batch_features:float()
+  if batch_idx == interval:size(1) then 
+    interval_is_over = true
     print('Collected enough data. Samples distribution by class: '); print(buffer_count:reshape(1,10)) 
     buffer = complete_buffer(buffer, buffer_count, GAN, feature_extractor, opt)
-    print('Training clasifier with collected data')
     for epoch = 1, opt.epoch_nb do
       C_model = train_classifier(C_model, buffer, opt)
     end
     buffer, buffer_count = init_buffer(opt)
-  end
-  if batch_idx == interval:size(1) then 
-    interval_is_over = true
     print('Currently real images fed to GANS, per class: '); print(GAN_count:reshape(1, 10)*opt.batchSize)
     confusion = test_classifier(C_model, testset); print(confusion)
     im_to_save = generate_image_grid(GAN, visu_noise)
-    image.save('./results/LSUN/image_grids/interval_' .. interval_idx .. '.png', im_to_save)
-    image.save('./results/LSUN/image_grids/last.png', im_to_save)
+    image.save('./results/LSUN_gen/image_grids/interval_' .. interval_idx .. '.png', im_to_save)
+    image.save('./results/LSUN_gen/image_grids/last.png', im_to_save)
     to_save.confusion[interval_idx] = confusion
     to_save.GAN_count[interval_idx] = GAN_count
-    torch.save('./results/LSUN/stream/confusions.t7', to_save)
+    torch.save('./results/LSUN_gen/stream/confusions.t7', to_save)
     if interval_idx%10==0 then
-      torch.save('./models/progress/LSUN_generators/interval_' .. interval_idx .. '_DCGAN.t7', GAN)
-      torch.save('./models/progress/LSUN_stream_classifier.t7', C_model)
+      torch.save('./models/progress/LSUN_generators_gen/interval_' .. interval_idx .. '_DCGAN.t7', GAN)
+      torch.save('./models/progress/LSUN_stream_classifier_gen.t7', C_model)
     end
   end
 end
