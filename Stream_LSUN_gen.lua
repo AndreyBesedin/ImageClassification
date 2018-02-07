@@ -28,16 +28,17 @@ opt = {
   batchSize = 16,
   loadSize = 256,
   fineSize = 224,
-  interval_size = {300, 400},
+  interval_size = {1000, 1500},
   bufferSize = 200, -- Number of batches in the buffer
   gpu = 1,
   dropout = 0,
-  epoch_nb = 5,
+  epoch_nb = 3,
   testing = 'real',
   continue_training = false,
   init_pretrained = false,
   train_batch_fake = false,
   train_batch_real = false,
+  first_interval = 1,
   totalClasses = 10, -- Total nb of classes in stream, basically unknown but since we use static datasets as stream, let's say we know it... 
 }
 
@@ -80,10 +81,10 @@ end
 -- LSUN_CLASSIFIER
 function init_classifier_LSUN(inSize, nbClasses, opt)
    -- Defining classification model 
-  if opt.continue_training then
-    local C = torch.load('./models/progress/LSUN_stream_classifier_gen.t7')
-    return C
-  end
+--  if opt.continue_training then
+--    local C = torch.load('./models/progress/LSUN_stream_classifier_gen.t7')
+--    return C
+--  end
   local C = nn.Sequential(); 
   C:add(nn.Linear(inSize, 1024)):add(nn.ReLU())
   C:add(nn.Linear(1024, 512)):add(nn.ReLU())
@@ -107,12 +108,14 @@ end
 function load_pretrained_generators_LSUN(opt)
   local GAN = {} 
   -- Initialize all the models with some pretrained model (let's say bridge generator)
+  if opt.continue_training then
+    print('Continue training from the interval ' .. opt.first_interval)
+    GAN = torch.load('./models/progress/LSUN_generators_gen/interval_' .. opt.first_interval .. '_DCGAN.t7')
+    return GAN
+  end
   for idx_model = 1, #opt.full_data_classes do
     GAN[idx_model] = {}
-    if opt.continue_training then
-      GAN[idx_model].G = torch.load('./models/progress/LSUN_generators_gen/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_G.t7')
-      GAN[idx_model].D = torch.load('./models/progress/LSUN_generators_gen/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_D.t7')
-    elseif opt.init_pretrained == true then
+    if opt.init_pretrained == true then
       GAN[idx_model].G = torch.load('./models/LSUN_generators/pretrained/init_G.t7')
       GAN[idx_model].D = torch.load('./models/LSUN_generators/pretrained/init_D.t7')
     else
@@ -120,7 +123,6 @@ function load_pretrained_generators_LSUN(opt)
       GAN[idx_model].D = init_D()
     end
   end
-  if opt.continue_training then return GAN end
   -- Replace chosen classes with respective pretrained models
   for idx_model = 1, #opt.pretrainedClasses do
     GAN[opt.pretrainedClasses[idx_model]].G = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_G.t7')
@@ -243,7 +245,7 @@ function get_new_interval(classes, opt)
     -- Choose class from available in the interval, but different from the current
     current_class = interval_classes[interval_classes:ne(current_class)][torch.random(interval_classes:size(1)-1)] 
     -- Number of consequent batches that come from one class
-    local class_duration = math.floor(torch.uniform(5,15))
+    local class_duration = math.floor(torch.uniform(30,50))
     --print('Class: ' .. current_class .. ', duration: ' .. class_duration .. ' batches')
     interval[{{idx_batch, math.min(idx_batch + class_duration, interval_length)}}]:fill(current_class);
     idx_batch = idx_batch + class_duration
@@ -315,33 +317,32 @@ end
 -- TRAINING/TESTING FUNCTIONS 
 ---------------------------------------------------------------------------------------------------------
 
-function train_GAN(GAN, data, optimState_)  
-  parametersD, gradParametersD = GAN.D:getParameters()
-  parametersG, gradParametersG = GAN.G:getParameters()
-  input = torch.CudaTensor(opt.batchSize, 3, 64, 64)
-  noise = torch.CudaTensor(opt.batchSize, 100, 1, 1)
-  label = torch.CudaTensor(opt.batchSize)
+function train_GAN(data_, idx_class)  
+  local parametersD, gradParametersD = GAN[idx_class].D:getParameters()
+  local parametersG, gradParametersG = GAN[idx_class].G:getParameters()
+  local input = torch.CudaTensor(opt.batchSize, 3, 64, 64)
+  local noise = torch.CudaTensor(opt.batchSize, 100, 1, 1)
+  local label = torch.CudaTensor(opt.batchSize)
   local fDx = function(x)
     gradParametersD:zero()
     -- train with real
-    local real = data:cuda()
+    local real = data_:cuda()
     input:copy(real)
     label:fill(1)
-    local output = GAN.D:forward(input)
+    local output = GAN[idx_class].D:forward(input)
     local errD_real = GAN_criterion:forward(output, label)
     local df_do = GAN_criterion:backward(output, label)
-    GAN.D:backward(input, df_do)
-
+    GAN[idx_class].D:backward(input, df_do)
     -- train with fake
     noise:normal(0, 1)
-    local fake = GAN.G:forward(noise)
+    local fake = GAN[idx_class].G:forward(noise)
     input:copy(fake)
     label:fill(0)
 
-    local output = GAN.D:forward(input)
+    local output = GAN[idx_class].D:forward(input)
     local errD_fake = GAN_criterion:forward(output, label)
     local df_do = GAN_criterion:backward(output, label)
-    GAN.D:backward(input, df_do)
+    GAN[idx_class].D:backward(input, df_do)
 
     errD = errD_real + errD_fake
     return errD, gradParametersD
@@ -356,21 +357,23 @@ function train_GAN(GAN, data, optimState_)
     input:copy(fake) ]]--
     label:fill(1) -- fake labels are real for generator cost
 
-    local output = GAN.D.output -- netD:forward(input) was already executed in fDx, so save computation
+    local output = GAN[idx_class].D.output -- netD:forward(input) was already executed in fDx, so save computation
     errG = GAN_criterion:forward(output, label)
     local df_do = GAN_criterion:backward(output, label)
-    local df_dg = GAN.D:updateGradInput(input, df_do)
+    local df_dg = GAN[idx_class].D:updateGradInput(input, df_do)
 
-    GAN.G:backward(noise, df_dg)
+    GAN[idx_class].G:backward(noise, df_dg)
     return errG, gradParametersG
   end
 
-  optim.adam(fDx, parametersD, optimState_.D)
-  optim.adam(fGx, parametersG, optimState_.G)
+  optim.adam(fDx, parametersD, optimState_GAN[idx_class].D)
+  optim.adam(fGx, parametersG, optimState_GAN[idx_class].G)
+--  print('t for G: ', optimState_GAN[idx_class].G.t)
+--  print('t for D: ', optimState_GAN[idx_class].D.t)
   parametersD, gradParametersD = nil, nil -- nil them to avoid spiking memory
   parametersG, gradParametersG = nil, nil
   collectgarbage()
-  return GAN, errD, errG
+  return errD, errG
 end
 
 function train_classifier(C_model, data, opt)
@@ -403,7 +406,7 @@ function train_classifier(C_model, data, opt)
     input:copy(batch.data)
     label:copy(batch.labels)
     optim.adam(fx, p, config, optimState)
-    C_model:clearState()
+--    C_model:clearState()
     p, gp = C_model:getParameters()
 --    if i%1000==0 then idx_test = idx_test + 1; confusion_test_[idx_test] = test_classifier(C_model, testset); print(confusion_test_[idx_test]); end
   end
@@ -464,6 +467,11 @@ optimState = {
   learningRate = opt.lr,
   weightDecay = 1e-4,
 }
+for idx = 1, #opt.pretrainedClasses do
+  optimState_GAN[opt.pretrainedClasses[idx]].D.t = 2e+7
+  optimState_GAN[opt.pretrainedClasses[idx]].G.t = 2e+8
+end
+
 
 config = {
   learningRate = opt.lr,
@@ -556,6 +564,7 @@ to_save.GAN_count[0] = torch.zeros(10)
 to_save.intervals.duration[0] = 0
 to_save.intervals.classes[0] = classes
 visu_noise = torch.FloatTensor(10, 100, 1, 1); visu_noise = visu_noise:normal(0,1); visu_noise =visu_noise:cuda()
+interval_idx = opt.first_interval
 while Stream do
   collectgarbage()
   if interval_is_over == true then 
@@ -573,8 +582,8 @@ while Stream do
   batch_idx = batch_idx + 1
   batch_orig = DATA[current_class]:getBatch(opt.batchSize)
   --print('RECEIVED DATA FROM CLASS ' .. current_class)
-  GAN[current_class], errD, errG = train_GAN(GAN[current_class], rescale_3D_batch(batch_orig:float(), 64), optimState_GAN[current_class])
-  print('Class ' .. current_class .. ', errD = ' .. errD .. ', errG = ' .. errG)
+  errD, errG = train_GAN(rescale_3D_batch(batch_orig:float(), 64), current_class)
+ -- print('Class ' .. current_class .. ', errD = ' .. errD .. ', errG = ' .. errG)
   --local batch_features = feature_extractor:forward(batch_orig:cuda())
   
   -- Filling in the buffer
