@@ -32,13 +32,13 @@ opt = {
   bufferSize = 200, -- Number of batches in the buffer
   gpu = 1,
   dropout = 0,
-  epoch_nb = 3,
+  epoch_nb = 5,
   testing = 'real',
-  continue_training = false,
+  continue_training = true,
   init_pretrained = false,
   train_batch_fake = false,
   train_batch_real = false,
-  first_interval = 1,
+  first_interval = 180,
   totalClasses = 10, -- Total nb of classes in stream, basically unknown but since we use static datasets as stream, let's say we know it... 
 }
 
@@ -405,7 +405,7 @@ function train_classifier(C_model, data, opt)
     batch = getBatch(data, indices:long())
     input:copy(batch.data)
     label:copy(batch.labels)
-    optim.adam(fx, p, config, optimState)
+    optim.adam(fx, p, optimState)
 --    C_model:clearState()
     p, gp = C_model:getParameters()
 --    if i%1000==0 then idx_test = idx_test + 1; confusion_test_[idx_test] = test_classifier(C_model, testset); print(confusion_test_[idx_test]); end
@@ -460,23 +460,18 @@ GAN_criterion = GAN_criterion:cuda()
 optimState_GAN = {}
 for idx = 1, 10 do
   optimState_GAN[idx]= {}
-  optimState_GAN[idx].D = {learningRate=0.0002, beta1 = 0.5}
-  optimState_GAN[idx].G = {learningRate=0.0002, beta1 = 0.5}
+  optimState_GAN[idx].D = {learningRate=0.0002, beta1 = 0.5, learningRateDecay = 1e-4}
+  optimState_GAN[idx].G = {learningRate=0.0002, beta1 = 0.5, learningRateDecay = 1e-4}
 end
+
 optimState = {
   learningRate = opt.lr,
-  weightDecay = 1e-4,
+--  weightDecay = 1e-4,
 }
 for idx = 1, #opt.pretrainedClasses do
-  optimState_GAN[opt.pretrainedClasses[idx]].D.t = 2e+7
+  optimState_GAN[opt.pretrainedClasses[idx]].D.t = 2e+8
   optimState_GAN[opt.pretrainedClasses[idx]].G.t = 2e+8
 end
-
-
-config = {
-  learningRate = opt.lr,
-  weightDecay = 1e-4,
-}
 
 ---------------------------------------------------------------------------------------------------------
 -- PRELOADING TESTSET, THIS ONE WON'T BE CHANGING 
@@ -606,6 +601,8 @@ while Stream do
     image.save('./results/LSUN_gen/image_grids/last.png', im_to_save)
     to_save.confusion[interval_idx] = confusion
     to_save.GAN_count[interval_idx] = GAN_count
+    to_save.optimState_GAN = optimState_GAN
+    to_save.optimState_classif = optimState
     torch.save('./results/LSUN_gen/stream/confusions.t7', to_save)
     if interval_idx%10==0 then
       torch.save('./models/progress/LSUN_generators_gen/interval_' .. interval_idx .. '_DCGAN.t7', GAN)
