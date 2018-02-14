@@ -1,6 +1,6 @@
 # Stream Image Classification using DCGANs for data regeneration with torch
 
-Paper based on the results produced by this code is available at Paper/gan-based-online.pdf
+Paper based on the results produced by this code is available at https://github.com/AndreyBesedin/ImageClassification/blob/master/Paper/gan-based-online.pdf
 
 LSUN dataset preparation:
 
