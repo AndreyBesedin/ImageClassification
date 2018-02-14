@@ -1,4 +1,6 @@
-# Image Classification with torch
+# Stream Image Classification using DCGANs for data regeneration with torch
+
+Paper based on the results produced by this code is available at Paper/gan-based-online.pdf
 
 LSUN dataset preparation:
 
@@ -7,3 +9,4 @@ Getting the dataset:
 - cd lsun
 - python2.7 download.py (will download 160 Gb of images in .lmdb format, more details on the dataset can be found at http://lsun.cs.princeton.edu/2017/) 
 
+README is in progress, for any question please contact Andrey Besedin at andrey.besedin@cea.fr 
