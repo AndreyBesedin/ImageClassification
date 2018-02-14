@@ -17,7 +17,6 @@ dofile('./tools/tools.lua')
 -- ADVANCED OPTIONS FOR TRAINING
 -------------------------------------------------------------------------------------------------------
 opt = {
-  lr = 0.001,
   nThreads = 6,
   initClassNb = 4, -- Number of already pretrained classes in the model
   pretrainedClasses = {2, 3, 4, 5},
@@ -38,7 +37,7 @@ opt = {
   init_pretrained = false,
   train_batch_fake = false,
   train_batch_real = false,
-  first_interval = 180,
+  first_interval = 1100,
   totalClasses = 10, -- Total nb of classes in stream, basically unknown but since we use static datasets as stream, let's say we know it... 
 }
 
@@ -116,8 +115,8 @@ function load_pretrained_generators_LSUN(opt)
   for idx_model = 1, #opt.full_data_classes do
     GAN[idx_model] = {}
     if opt.init_pretrained == true then
-      GAN[idx_model].G = torch.load('./models/LSUN_generators/pretrained/init_G.t7')
-      GAN[idx_model].D = torch.load('./models/LSUN_generators/pretrained/init_D.t7')
+      GAN[idx_model].G = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[idx_model] .. '_G.t7')
+      GAN[idx_model].D = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[idx_model] .. '_D.t7')
     else
       GAN[idx_model].G = init_G()
       GAN[idx_model].D = init_D()
@@ -212,7 +211,7 @@ function generate_data(G, batchSize)
   return batch:cuda()
 end
 
- function rescale_3D_batch(batch, outSize)
+function rescale_3D_batch(batch, outSize)
   if #batch:size()<4 then error('not 3D data batch') end
   if batch:size(3)~=batch:size(4) then error('images are not square') end
   local batchSize = batch:size(1)
@@ -410,6 +409,7 @@ function train_classifier(C_model, data, opt)
     p, gp = C_model:getParameters()
 --    if i%1000==0 then idx_test = idx_test + 1; confusion_test_[idx_test] = test_classifier(C_model, testset); print(confusion_test_[idx_test]); end
   end
+  print('Parameters norm: ' .. p:norm())
   print('Training set confusion matrix: ')
   print(confusion_train)
   return C_model, confusion_test_
@@ -469,8 +469,8 @@ optimState = {
 --  weightDecay = 1e-4,
 }
 for idx = 1, #opt.pretrainedClasses do
-  optimState_GAN[opt.pretrainedClasses[idx]].D.t = 2e+8
-  optimState_GAN[opt.pretrainedClasses[idx]].G.t = 2e+8
+  optimState_GAN[opt.pretrainedClasses[idx]].D.t = 2e+10
+  optimState_GAN[opt.pretrainedClasses[idx]].G.t = 2e+10
 end
 
 ---------------------------------------------------------------------------------------------------------
@@ -559,7 +559,8 @@ to_save.GAN_count[0] = torch.zeros(10)
 to_save.intervals.duration[0] = 0
 to_save.intervals.classes[0] = classes
 visu_noise = torch.FloatTensor(10, 100, 1, 1); visu_noise = visu_noise:normal(0,1); visu_noise =visu_noise:cuda()
-interval_idx = opt.first_interval
+interval_idx = 0
+interval_is_over = true
 while Stream do
   collectgarbage()
   if interval_is_over == true then 
@@ -589,11 +590,11 @@ while Stream do
   if batch_idx == interval:size(1) then 
     interval_is_over = true
     print('Collected enough data. Samples distribution by class: '); print(buffer_count:reshape(1,10)) 
+    buffer, buffer_count = init_buffer(opt)
     buffer = complete_buffer(buffer, buffer_count, GAN, feature_extractor, opt)
     for epoch = 1, opt.epoch_nb do
       C_model = train_classifier(C_model, buffer, opt)
     end
-    buffer, buffer_count = init_buffer(opt)
     print('Currently real images fed to GANS, per class: '); print(GAN_count:reshape(1, 10)*opt.batchSize)
     confusion = test_classifier(C_model, testset); print(confusion)
     im_to_save = generate_image_grid(GAN, visu_noise)

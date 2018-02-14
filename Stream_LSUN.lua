@@ -17,11 +17,11 @@ dofile('./tools/tools.lua')
 -- ADVANCED OPTIONS FOR TRAINING
 -------------------------------------------------------------------------------------------------------
 opt = {
-  lr = 0.001,
+  lr = 0.0005,
   nThreads = 6,
   initClassNb = 4, -- Number of already pretrained classes in the model
-  pretrainedClasses = {2, 3, 4, 5},
---  pretrainedClasses = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+--  pretrainedClasses = {2, 3, 4, 5},
+  pretrainedClasses = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
   maxClassNb = 5,      -- Maximum nb of classes in any stream interval
   usePretrainedModels = true,
   imSize = 224,
@@ -32,11 +32,11 @@ opt = {
   bufferSize = 50, -- Number of batches in the buffer
   gpu = 1,
   dropout = 0,
-  epoch_nb = 2,
+  epoch_nb = 10,
   testing = 'real',
   continue_training = false,
   init_pretrained = false,
-  train_batch_fake = false,
+  train_batch_fake = true,
   train_batch_real = false,
   totalClasses = 10, -- Total nb of classes in stream, basically unknown but since we use static datasets as stream, let's say we know it... 
 }
@@ -254,7 +254,7 @@ end
 function get_new_classes(classes, opt)
   local available_classes = torch.range(1, opt.totalClasses)
   -- We have limited nb of classes in one interval
-  local maxClassNb = opt.maxClassNb
+  maxClassNb = opt.maxClassNb
   -- Nb of classes in previous stream interval:
   local N = classes:size(1)                                                    
   -- Keeping at least one and at max N-1 classes:
@@ -405,7 +405,7 @@ function train_classifier(C_model, data, opt)
     optim.adam(fx, p, config, optimState)
     C_model:clearState()
     p, gp = C_model:getParameters()
---    if i%1000==0 then idx_test = idx_test + 1; confusion_test_[idx_test] = test_classifier(C_model, testset); print(confusion_test_[idx_test]); end
+    if i%500==0 then idx_test = idx_test + 1; confusion_test_[idx_test] = test_classifier(C_model, testset); print(confusion_test_[idx_test]); end
   end
   print('Training set confusion matrix: ')
   print(confusion_train)
@@ -439,12 +439,12 @@ end
 -- INITIALIZING TRAINING AND PARAMETERS
 ---------------------------------------------------------------------------------------------------------
         
-if not DATA then DATA = initialize_loaders(opt) end
-interval_is_over = true; interval_idx = 0
-GAN_count = torch.zeros(10); buffer_count = torch.zeros(10)
+--if not DATA then DATA = initialize_loaders(opt) end
+local interval_is_over = true; local interval_idx = 0
+local GAN_count = torch.zeros(10); local buffer_count = torch.zeros(10)
 
-Stream = true
-classes = torch.FloatTensor(opt.pretrainedClasses);  -- Initializing classes to the start of the stream
+local Stream = false
+local classes = torch.FloatTensor(opt.pretrainedClasses);  -- Initializing classes to the start of the stream
 -- Parameters for the training step zero:
 
 buffer, buffer_count = init_buffer(opt)
@@ -453,7 +453,7 @@ classif_criterion = nn.ClassNLLCriterion()
 GAN_criterion = nn.BCECriterion()
 GAN_criterion = GAN_criterion:cuda()
 
- test_res = {}
+local test_res = {}
 optimState_GAN = {}
 for idx = 1, 10 do
   optimState_GAN[idx]= {}
@@ -518,92 +518,78 @@ if opt.train_batch_fake then
 end
 
 if opt.train_batch_real then
-  trainset = torch.load('./subsets/full/lsun_full_50k_per_class_1.t7')
   confusion_test = {}
-  confusion_test[0] = test_classifier(C_model, testset); print(confusion_test[0]) 
+  confusion_test[0] = test_classifier(C_model, testset); print(confusion_test[0])
   for epoch = 1, opt.epoch_nb do
-    C_model, confusion = train_classifier(C_model, trainset, opt)
-    confusion_test[epoch] = confusion
+    for idx = 1, 5 do
+      C_model, confusion = train_classifier(C_model, trainset, opt)
+      confusion_test[idx+(epoch-1)*5] = confusion
+    end
     torch.save('results/batch_training/LSUN_real.t7', confusion_test)
   end
 end
 
-function generate_image_grid(GAN, visu_noise)
-  local im_full = torch.FloatTensor(3,640,640):cuda()
-  for idx_class = 1, 10 do
-    gen_images = GAN[idx_class].G:forward(visu_noise:cuda())
-    for idx_im = 1, 10 do
-      im_full[{{},{1+64*(idx_im-1), 64*idx_im},{1+64*(idx_class - 1), 64*idx_class}}]=gen_images[idx_im]:squeeze():float()
-    end
-  end
-  return (im_full+1)/2
-end
-
---opt_zero = deepcopy(opt); opt_zero.bufferSize = opt.bufferSize*5;
---buffer_zero, buffer_count_zero = init_buffer(opt_zero)
---buffer_zero = complete_buffer(buffer_zero, buffer_count_zero, GAN, feature_extractor, opt_zero)
---for epoch = 1, 1 do
---  C_model = train_classifier(C_model, buffer_zero, opt_zero)
---end
-to_save = {}
-to_save.confusion = {}
-to_save.GAN_count = {}
-to_save.intervals = {}
-to_save.intervals.duration = {}
-to_save.intervals.classes = {}
-to_save.confusion[0] = test_classifier(C_model, testset); print(to_save.confusion[0])
-to_save.GAN_count[0] = torch.zeros(10)
-to_save.intervals.duration[0] = 0
-to_save.intervals.classes[0] = classes
-visu_noise = torch.FloatTensor(10, 100, 1, 1); visu_noise = visu_noise:normal(0,1); visu_noise =visu_noise:cuda()
-while Stream do
-  collectgarbage()
-  if interval_is_over == true then 
-    print('\nInterval ' .. interval_idx .. ' is over, starting next')
-    interval_idx = interval_idx + 1
---    classes = get_new_classes(classes, opt) -- getting classes that would appear in the new interval
-    interval, classes = get_new_interval(classes, opt) -- fill in the interval with ordered classes of batches from stream
-    to_save.intervals.duration[interval_idx] = interval:size(1)
-    to_save.intervals.classes[interval_idx] = classes
-    print('New classes: '); print(classes:reshape(1,classes:size(1)))
-    batch_idx = 1
-    interval_is_over = false
-  end 
-  local current_class = interval[batch_idx]
-  batch_idx = batch_idx + 1
-  batch_orig = DATA[current_class]:getBatch(opt.batchSize)
-  --print('RECEIVED DATA FROM CLASS ' .. current_class)
-  GAN[current_class], errD, errG = train_GAN(GAN[current_class], rescale_3D_batch(batch_orig:float(), 64), optimState_GAN[current_class])
-  print('Class ' .. current_class .. ', errD = ' .. errD .. ', errG = ' .. errG)
-  local batch_features = feature_extractor:forward(batch_orig:cuda())
-  
-  -- Filling in the buffer
-  buffer_count[current_class] = buffer_count[current_class] + 1
-  xlua.progress(buffer_count:sum(), opt.bufferSize*classes:size(1))
-  GAN_count[current_class] = GAN_count[current_class] + 1
-  buffer[{{current_class},{1 + (buffer_count[current_class]-1)*opt.batchSize, buffer_count[current_class]*opt.batchSize},{}}] = batch_features:float()
-  if buffer_count[current_class] == opt.bufferSize then
-    print('Collected enough data. Samples distribution by class: '); print(buffer_count:reshape(1,10)) 
-    buffer = complete_buffer(buffer, buffer_count, GAN, feature_extractor, opt)
-    print('Training clasifier with collected data')
-    for epoch = 1, opt.epoch_nb do
-      C_model = train_classifier(C_model, buffer, opt)
-    end
-    buffer, buffer_count = init_buffer(opt)
-  end
-  if batch_idx == interval:size(1) then 
-    interval_is_over = true
-    print('Currently real images fed to GANS, per class: '); print(GAN_count:reshape(1, 10)*opt.batchSize)
-    confusion = test_classifier(C_model, testset); print(confusion)
-    im_to_save = generate_image_grid(GAN, visu_noise)
-    image.save('./results/LSUN/image_grids/interval_' .. interval_idx .. '.png', im_to_save)
-    image.save('./results/LSUN/image_grids/last.png', im_to_save)
-    to_save.confusion[interval_idx] = confusion
-    to_save.GAN_count[interval_idx] = GAN_count
-    torch.save('./results/LSUN/stream/confusions.t7', to_save)
-    if interval_idx%10==0 then
-      torch.save('./models/progress/LSUN_generators/interval_' .. interval_idx .. '_DCGAN.t7', GAN)
-      torch.save('./models/progress/LSUN_stream_classifier.t7', C_model)
-    end
-  end
-end
+-- opt_zero = deepcopy(opt); opt_zero.bufferSize = opt.bufferSize*5;
+-- buffer_zero, buffer_count_zero = init_buffer(opt_zero)
+-- buffer_zero = complete_buffer(buffer_zero, buffer_count_zero, GAN, feature_extractor, opt_zero)
+-- for epoch = 1, 1 do
+--   C_model = train_classifier(C_model, buffer_zero, opt_zero)
+-- end
+-- to_save = {}
+-- to_save.confusion = {}
+-- to_save.GAN_count = {}
+-- to_save.intervals = {}
+-- to_save.intervals.duration = {}
+-- to_save.intervals.classes = {}
+-- to_save.confusion[0] = test_classifier(C_model, testset); print(to_save.confusion[0])
+-- to_save.GAN_count[0] = torch.zeros(10)
+-- to_save.intervals.duration[0] = 0
+-- to_save.intervals.classes[0] = classes
+-- while Stream do
+--   collectgarbage()
+--   if interval_is_over == true then 
+--     print('\nInterval ' .. interval_idx .. ' is over, starting next')
+--     interval_idx = interval_idx + 1
+-- --    classes = get_new_classes(classes, opt) -- getting classes that would appear in the new interval
+--     interval, classes = get_new_interval(classes, opt) -- fill in the interval with ordered classes of batches from stream
+--     to_save.intervals.duration[interval_idx] = interval:size(1)
+--     to_save.intervals.classes[interval_idx] = classes
+--     print('New classes: '); print(classes:reshape(1,classes:size(1)))
+--     batch_idx = 1
+--     interval_is_over = false
+--   end 
+--   local current_class = interval[batch_idx]
+--   batch_idx = batch_idx + 1
+--   batch_orig = DATA[current_class]:getBatch(opt.batchSize)
+--   --print('RECEIVED DATA FROM CLASS ' .. current_class)
+--   GAN[current_class], errD, errG = train_GAN(GAN[current_class], rescale_3D_batch(batch_orig:float(), 64), optimState_GAN[current_class])
+--   print('Class ' .. current_class .. ', errD = ' .. errD .. ', errG = ' .. errG)
+--   local batch_features = feature_extractor:forward(batch_orig:cuda())
+--   
+--   -- Filling in the buffer
+--   buffer_count[current_class] = buffer_count[current_class] + 1
+--   xlua.progress(buffer_count:sum(), opt.bufferSize*classes:size(1))
+--   GAN_count[current_class] = GAN_count[current_class] + 1
+--   buffer[{{current_class},{1 + (buffer_count[current_class]-1)*opt.batchSize, buffer_count[current_class]*opt.batchSize},{}}] = batch_features:float()
+--   if buffer_count[current_class] == opt.bufferSize then
+--     print('Collected enough data. Samples distribution by class: '); print(buffer_count:reshape(1,10)) 
+--     buffer = complete_buffer(buffer, buffer_count, GAN, feature_extractor, opt)
+--     print('Training clasifier with collected data')
+--     for epoch = 1, opt.epoch_nb do
+--       C_model = train_classifier(C_model, buffer, opt)
+--     end
+--     buffer, buffer_count = init_buffer(opt)
+--   end
+--   if batch_idx == interval:size(1) then 
+--     interval_is_over = true
+--     print('Currently real images fed to GANS, per class: '); print(GAN_count:reshape(1, 10)*opt.batchSize)
+--     confusion = test_classifier(C_model, testset); print(confusion)
+--     to_save.confusion[interval_idx] = confusion
+--     to_save.GAN_count[interval_idx] = GAN_count
+--     torch.save('./results/LSUN/stream/confusions.t7', to_save)
+--     if interval_idx%10==0 then
+--       torch.save('./models/progress/LSUN_generators/interval_' .. interval_idx .. '_DCGAN.t7', GAN)
+--       torch.save('./models/progress/LSUN_stream_classifier.t7', C_model)
+--     end
+--   end
+-- end
