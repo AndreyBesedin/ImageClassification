@@ -28,7 +28,7 @@ function data.new(n, dataset_name, opt_)
    if n > 0 then
       local options = opt_
       self.threads = Threads(n,
-                             function() require 'torch' end,
+                             function() require 'torch'; require 'cudnn' end,
                              function(idx)
                                 opt = options
                                 tid = idx

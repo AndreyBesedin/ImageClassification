@@ -26,7 +26,7 @@ table.sort(classes)
 -- end
 
 -- Check for existence of opt.data
-opt.data = os.getenv('DATA_ROOT') or os.getenv('HOME') .. '/local/lsun'
+opt.data = os.getenv('DATA_ROOT') or opt.data_folder
 if not os.execute('cd ' .. opt.data) then
     error(("could not chdir to '%s'"):format(opt.data))
 end
