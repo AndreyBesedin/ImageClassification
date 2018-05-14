@@ -22,6 +22,7 @@ opt = {
   display = true,
   data_folder = '/home/besedin/workspace/Data/LSUN/data_lmdb',
   nThreads = 6,
+  train_only_on_generated = true,
   initClassNb = 4, -- Number of already pretrained classes in the model
   pretrainedClasses = {3, 4, 5},
 --  pretrainedClasses = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
@@ -31,14 +32,14 @@ opt = {
   batchSize = 16,
   loadSize = 256,
   fineSize = 224,
-  interval_size = {200, 300},
-  bufferSize = 50, -- Number of batches in the buffer
+  interval_size = {500, 1000},
+  bufferSize = 200, -- Number of batches in the buffer
   gpu = 1,
   dropout = 0,
-  epoch_nb = 1,
+  epoch_nb = 10,
   testing = 'real',
-  continue_training = false,
-  start_interval = 100,
+  continue_training = true,
+  start_interval = 148,
   init_pretrained = false,
   train_batch_fake = false,
   train_batch_real = false,
@@ -53,7 +54,7 @@ data_classes = {'bedroom', 'bridge', 'church_outdoor', 'classroom', 'conference_
                       'dining_room', 'kitchen', 'living_room', 'restaurant', 'tower'}    
 opt.history_per_class = torch.zeros(#data_classes)
 for idx = 1, #opt.pretrainedClasses do
-    opt.history_per_class[opt.pretrainedClasses[idx]] = 5e+6
+  opt.history_per_class[opt.pretrainedClasses[idx]] = 5e+6
 end
 -------------------------------------------------------------------------------------------------------
 -- MODIFYING OPTIONS
@@ -267,6 +268,6 @@ while Stream do
       torch.save('./models/progress/LSUN_generators/interval_' .. to_save.interval_idx .. '_DCGAN.t7', GAN)
       torch.save('./models/progress/LSUN_stream_classifier.t7', C_model)
     end
-    break
+--    break
   end
 end

@@ -220,6 +220,9 @@ function complete_buffer(buffer, buffer_count, GAN, feature_extractor, opt)
   --[[
   Function to complete the buffer with generated data.
   ]]
+  if opt.train_only_on_generated then
+    buffer, buffer_count = init_buffer(opt)
+  end
   print('\nCOMPLETENIG BUFFER WITH GENERATED DATA');
   local class_size = opt.bufferSize * opt.batchSize 
   local res = {}; res.data = torch.zeros(10*class_size, 2048):float(); res.labels = torch.zeros(10*class_size)
@@ -229,9 +232,9 @@ function complete_buffer(buffer, buffer_count, GAN, feature_extractor, opt)
       for idx_gen = buffer_count[idx_class] + 1, opt.bufferSize do
         xlua.progress(idx_gen, opt.bufferSize)
         local gen_batch_small = generate_data(GAN[idx_class].G, opt.batchSize)
---        if idx_gen%10==0 then 
---          disp.image(gen_batch_small, {win=idx_class, title=opt.full_data_classes[idx_class]})
---        end
+        if idx_gen%10==0 then 
+          disp.image(gen_batch_small, {win=10+idx_class, title=opt.full_data_classes[idx_class]})
+        end
         local gen_batch_big = rescale_3D_batch(gen_batch_small:clone():float(), 224)
         local features = feature_extractor:forward(gen_batch_big:cuda()) 
         buffer[{{idx_class},{1 + (idx_gen-1)*opt.batchSize, idx_gen*opt.batchSize},{}}] = features:clone():float()
