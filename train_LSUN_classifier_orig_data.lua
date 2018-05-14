@@ -92,15 +92,29 @@ p, gp = C_model:getParameters()
 ---------------------------------------------------------------------------------------------------------
 -- TRAINING
 ---------------------------------------------------------------------------------------------------------
-
-if opt.train_batch_real then
-  confusion_test = {}
-  confusion_test[0] = test_classifier(C_model, testset); print(confusion_test[0])
-  for epoch = 1, opt.epoch_nb do
-    for idx = 1, 5 do
-      C_model, confusion = train_classifier(C_model, trainset, opt)
-      confusion_test[idx+(epoch-1)*5] = confusion
-    end
-    torch.save('results/batch_training/LSUN_real.t7', confusion_test)
+function form_batch_orig(data,feature_extractor, images_per_class)
+  local dataset = {}
+  dataset.data = torch.FloatTensor(10*images_per_class, 2048) 
+  dataset.labels = torch.FloatTensor(10*images_per_class)
+  for idx_class = 1, 10 do
+    batch_orig = DATA[idx_class]:getBatch(images_per_class)
+--    batch_orig = rescale_3D_batch(images_per_class:float(), 64)
+    dataset.labels[{{1 + (idx_class-1)*images_per_class, idx_class*images_per_class}}]:fill(idx_class)
+    dataset.data[{{1 + (idx_class-1)*images_per_class, idx_class*images_per_class},{}}] = feature_extractor:forward(batch_orig:cuda())
   end
+  return dataset
+end
+
+confusion_test = {}
+opt.batches_per_epoch = 1e+4
+confusion_test[0] = test_classifier(C_model, testset); print(confusion_test[0])
+for epoch = 1, 200 do
+  for train_idx = 1, opt.batches_per_epoch do
+    xlua.progress(train_idx, opt.batches_per_epoch)
+    trainset = form_batch_orig(DATA, feature_extractor, opt.batchSize)
+    C_model, _ = train_classifier(C_model, trainset, opt)
+   -- confusion_test[idx+(epoch-1)*5] = confusion
+  end
+  confusion_test[epoch] = test_classifier(C_model, testset); print(confusion_test[epoch])
+--    torch.save('results/batch_training/LSUN_real.t7', confusion_test)
 end

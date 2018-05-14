@@ -320,7 +320,7 @@ function train_classifier(C_model, data, opt)
     local errM = criterion:forward(output, label)
     local df_do = criterion:backward(output, label)
     C_model:backward(input, df_do)
-    confusion_train:batchAdd(y_max:squeeze():float(), label:float())
+  --  confusion_train:batchAdd(y_max:squeeze():float(), label:float())
     return errM, gp
   end
   
@@ -329,10 +329,10 @@ function train_classifier(C_model, data, opt)
   criterion = classif_criterion:cuda()
   p, gp = C_model:getParameters()
   local indices_rand = torch.randperm(data.data:size(1))
-  confusion_train = optim.ConfusionMatrix(10)
-  confusion_train:zero()
+ -- confusion_train = optim.ConfusionMatrix(10)
+ -- confusion_train:zero()
   idx_test = 1
-  confusion_test_ = {}
+ -- confusion_test_ = {}
   for i = 1, math.floor(data.data:size(1)/opt.batchSize) do 
     xlua.progress(i, math.floor(data.data:size(1)/opt.batchSize))
     indices = indices_rand[{{1+(i-1)*opt.batchSize, i*opt.batchSize}}]
@@ -342,11 +342,11 @@ function train_classifier(C_model, data, opt)
     optim.adam(fx, p, config, optimState)
     C_model:clearState()
     p, gp = C_model:getParameters()
-    if i%500==0 then idx_test = idx_test + 1; confusion_test_[idx_test] = test_classifier(C_model, testset); print(confusion_test_[idx_test]); end
+ --   if i%500==0 then idx_test = idx_test + 1; confusion_test_[idx_test] = test_classifier(C_model, testset); print(confusion_test_[idx_test]); end
   end
   print('Training set confusion matrix: ')
-  print(confusion_train)
-  return C_model, confusion_test_
+  --print(confusion_train)
+  return C_model --, confusion_test_
 end
 
 function getBatch(data, indices)
