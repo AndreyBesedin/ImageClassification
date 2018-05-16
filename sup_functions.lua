@@ -5,8 +5,8 @@
 -- LSUN_CLASSIFIER
 function init_classifier_LSUN(inSize, nbClasses, opt)
    -- Defining classification model 
-  if opt.continue_training then
-    local C = torch.load('./models/progress/LSUN_stream_classifier.t7')
+  if opt.pretrained_classifier then
+    local C = torch.load('./models/classifiers/LSUN_real_data_classifier.t7')
     return C
   end
   local C = nn.Sequential(); 
@@ -19,7 +19,7 @@ function init_classifier_LSUN(inSize, nbClasses, opt)
 end
 -- FEATURE EXTRACTOR FOR LSUN IMAGES
 function init_feature_extractor(path_to_fs)
-  local feature_extractor = torch.load('./models/feature_extractors/resnet-200.t7')
+  local feature_extractor = torch.load(path_to_fs)
   feature_extractor:remove(14); 
   feature_extractor:remove(13); 
   feature_extractor:add(nn.View(2048)); 
@@ -137,7 +137,8 @@ function generate_data(G, batchSize)
   return batch:cuda()
 end
 
- function rescale_3D_batch(batch, outSize)
+function rescale_3D_batch(batch, outSize)
+  batch = batch:float()
   if #batch:size()<4 then error('not 3D data batch') end
   if batch:size(3)~=batch:size(4) then error('images are not square') end
   local batchSize = batch:size(1)
@@ -146,7 +147,7 @@ end
   for idx_im = 1, batchSize do
     new_batch[idx_im] = image.scale(batch[idx_im], outSize)
   end
-  return new_batch:float()
+  return new_batch:cuda()
 end
 ---------------------------------------------------------------------------------------------------------
 -- FUNCTION TO FORM THE STREAM 
@@ -231,7 +232,9 @@ function complete_buffer(buffer, buffer_count, GAN, feature_extractor, opt)
       print('Generating ' .. opt.full_data_classes[idx_class] .. 's')
       for idx_gen = buffer_count[idx_class] + 1, opt.bufferSize do
         xlua.progress(idx_gen, opt.bufferSize)
-        local gen_batch_small = generate_data(GAN[idx_class].G, opt.batchSize)
+--        local gen_batch_small = generate_data(GAN[idx_class].G, opt.batchSize)
+        local gen_batch_small = torch.CudaTensor(opt.batchSize, 3, 64, 64)
+        gen_batch_small:normal(0, 0.3)
         if idx_gen%10==0 then 
           disp.image(gen_batch_small, {win=10+idx_class, title=opt.full_data_classes[idx_class]})
         end
@@ -344,7 +347,7 @@ function train_classifier(C_model, data, opt)
     p, gp = C_model:getParameters()
  --   if i%500==0 then idx_test = idx_test + 1; confusion_test_[idx_test] = test_classifier(C_model, testset); print(confusion_test_[idx_test]); end
   end
-  print('Training set confusion matrix: ')
+  --print('Training set confusion matrix: ')
   --print(confusion_train)
   return C_model --, confusion_test_
 end

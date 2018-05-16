@@ -22,7 +22,7 @@ opt = {
   data_folder = '/home/besedin/workspace/Data/LSUN/data_lmdb',
   nThreads = 6,
   imSize = 224,
-  batchSize = 16,
+  batchSize = 24,
   loadSize = 256,
   fineSize = 224,
   gpu = 1,
@@ -56,7 +56,7 @@ cutorch.setDevice(1)
 ---------------------------------------------------------------------------------------------------------
         
 if not DATA then DATA = initialize_loaders(opt) end
-classes = torch.FloatTensor(opt.pretrainedClasses);  -- Initializing classes to the start of the stream
+--classes = torch.FloatTensor(opt.pretrainedClasses);  -- Initializing classes to the start of the stream
 -- Parameters for the training step zero:
 
 classif_criterion = nn.ClassNLLCriterion()
@@ -94,8 +94,8 @@ p, gp = C_model:getParameters()
 ---------------------------------------------------------------------------------------------------------
 function form_batch_orig(data,feature_extractor, images_per_class)
   local dataset = {}
-  dataset.data = torch.FloatTensor(10*images_per_class, 2048) 
-  dataset.labels = torch.FloatTensor(10*images_per_class)
+  dataset.data = torch.CudaTensor(10*images_per_class, 2048) 
+  dataset.labels = torch.CudaTensor(10*images_per_class)
   for idx_class = 1, 10 do
     batch_orig = DATA[idx_class]:getBatch(images_per_class)
 --    batch_orig = rescale_3D_batch(images_per_class:float(), 64)
@@ -106,15 +106,20 @@ function form_batch_orig(data,feature_extractor, images_per_class)
 end
 
 confusion_test = {}
-opt.batches_per_epoch = 1e+4
+opt.batches_per_epoch = 1e+1
 confusion_test[0] = test_classifier(C_model, testset); print(confusion_test[0])
-for epoch = 1, 200 do
+maxTotalValid = 0
+for epoch = 1, 4000 do
   for train_idx = 1, opt.batches_per_epoch do
     xlua.progress(train_idx, opt.batches_per_epoch)
     trainset = form_batch_orig(DATA, feature_extractor, opt.batchSize)
     C_model, _ = train_classifier(C_model, trainset, opt)
    -- confusion_test[idx+(epoch-1)*5] = confusion
   end
-  confusion_test[epoch] = test_classifier(C_model, testset); print(confusion_test[epoch])
+  print('Finished mini-epoch nb ' .. epoch)
+  if epoch%10==0 then
+    confusion_test = test_classifier(C_model, testset); print(confusion_test)
+    if confusion_test.totalValid > maxTotalValid then maxTotalValid = confusion_test.totalValid; best_model = C_model:clone(); torch.save('./best_model.t7', best_model) end
 --    torch.save('results/batch_training/LSUN_real.t7', confusion_test)
+  end
 end
