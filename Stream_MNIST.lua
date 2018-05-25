@@ -461,10 +461,10 @@ config = {
 ---------------------------------------------------------------------------------------------------------
 
 print('\nLOADING THE TESTSET')
-path_to_testset = '/home/besedin/workspace/Data/MNIST/t7_files/testset.t7'
+path_to_testset = './datasets/MNIST/t7testset.t7'
 testset = torch.load(path_to_testset)
 print('\nTESTSET LOADED, SIZE: ' .. testset.data:size(1)); 
-path_to_trainset = '/home/besedin/workspace/Data/MNIST/t7_files/trainset.t7'
+path_to_trainset = './datasets/MNIST/t7/trainset.t7'
 trainset = torch.load(path_to_trainset)
 trainset_class = trainset_by_class(trainset) 
 print('\nTRAINSET LOADED, SIZE: ' .. trainset.data:size(1));
