@@ -48,9 +48,16 @@ function load_pretrained_generators_LSUN(opt)
   end
   if opt.continue_training then return GAN end
   -- Replace chosen classes with respective pretrained models
-  for idx_model = 1, #opt.pretrainedClasses do
-    GAN[opt.pretrainedClasses[idx_model]].G = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_G.t7')
-    GAN[opt.pretrainedClasses[idx_model]].D = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_D.t7')
+  if opt.start_with_pretrained then
+    for idx_model = 1, #opt.full_data_classes do
+      GAN[idx_model].G = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[idx_model] .. '_G.t7')
+      GAN[idx_model].D = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[idx_model] .. '_D.t7')
+    end
+  else
+    for idx_model = 1, #opt.pretrainedClasses do
+      GAN[opt.pretrainedClasses[idx_model]].G = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_G.t7')
+      GAN[opt.pretrainedClasses[idx_model]].D = torch.load('./models/LSUN_generators/pretrained/' .. opt.full_data_classes[opt.pretrainedClasses[idx_model]] .. '_D.t7')
+    end
   end
   for idx_model = 1, #opt.full_data_classes do
       GAN[idx_model].G = GAN[idx_model].G:cuda()
@@ -232,9 +239,9 @@ function complete_buffer(buffer, buffer_count, GAN, feature_extractor, opt)
       print('Generating ' .. opt.full_data_classes[idx_class] .. 's')
       for idx_gen = buffer_count[idx_class] + 1, opt.bufferSize do
         xlua.progress(idx_gen, opt.bufferSize)
---        local gen_batch_small = generate_data(GAN[idx_class].G, opt.batchSize)
         local gen_batch_small = torch.CudaTensor(opt.batchSize, 3, 64, 64)
-        gen_batch_small:normal(0, 0.3)
+        local gen_batch_small = generate_data(GAN[idx_class].G, opt.batchSize)
+--        gen_batch_small:normal(0, 0.3)
         if idx_gen%10==0 then 
           disp.image(gen_batch_small, {win=10+idx_class, title=opt.full_data_classes[idx_class]})
         end
@@ -345,7 +352,7 @@ function train_classifier(C_model, data, opt)
     optim.adam(fx, p, config, optimState)
     C_model:clearState()
     p, gp = C_model:getParameters()
- --   if i%500==0 then idx_test = idx_test + 1; confusion_test_[idx_test] = test_classifier(C_model, testset); print(confusion_test_[idx_test]); end
+    if i%500==0 then idx_test = idx_test + 1; confusion_test = test_classifier(C_model, testset); print(confusion_test); end
   end
   --print('Training set confusion matrix: ')
   --print(confusion_train)
@@ -360,7 +367,7 @@ function getBatch(data, indices)
 end
 
 function test_classifier(C_model, data)
-  local confusion = optim.ConfusionMatrix(10)
+  local confusion = optim.ConfusionMatrix(opt.nb_classes)
   confusion:zero()
   for idx = 1, data.data:size(1), opt.batchSize do
     --xlua.progress(idx, opt.testSize)

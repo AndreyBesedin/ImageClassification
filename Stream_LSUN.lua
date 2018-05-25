@@ -25,6 +25,7 @@ opt = {
   train_only_on_generated = false,
   initClassNb = 4, -- Number of already pretrained classes in the model
   pretrainedClasses = {3, 4, 5},
+  start_with_pretrained = true,
 --  pretrainedClasses = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
   maxClassNb = 5,      -- Maximum nb of classes in any stream interval
   usePretrainedModels = true,
@@ -180,6 +181,7 @@ else
   to_save.intervals = {}
   to_save.intervals.duration = {}
   to_save.intervals.classes = {}
+  to_save.intervals.samples_per_class = {}
   to_save.confusion[0] = test_classifier(C_model, testset); print(to_save.confusion[0])
   to_save.GAN_count[0] = torch.zeros(10)
   to_save.intervals.duration[0] = 0
@@ -218,14 +220,15 @@ while Stream do
     print('New classes: '); print(classes:reshape(1,classes:size(1)))
     batch_idx = 1
     interval_is_over = false
+    to_save.intervals.samples_per_class[to_save.interval_idx] = {}
+    nb_of_buffers = 0
   end
   -- Vizualization
-  
   local current_class = interval[batch_idx]
   batch_idx = batch_idx + 1
   batch_orig = DATA[current_class]:getBatch(opt.batchSize)
   --print('RECEIVED DATA FROM CLASS ' .. current_class)
-  if to_save.history_per_class[current_class] < 5e+6 then -- change for more sophisticated criterion later
+  if to_save.history_per_class[current_class] < 2e+7 then -- change for more sophisticated criterion later
     GAN[current_class], errD, errG = train_GAN(GAN, current_class, rescale_3D_batch(batch_orig:float(), 64), to_save.optimState_GAN[current_class])
     print('Class ' .. current_class .. ', errD = ' .. errD .. ', errG = ' .. errG)
   end
@@ -238,6 +241,8 @@ while Stream do
   GAN_count[current_class] = GAN_count[current_class] + 1
   buffer[{{current_class},{1 + (buffer_count[current_class]-1)*opt.batchSize, buffer_count[current_class]*opt.batchSize},{}}] = batch_features:clone():float()
   if buffer_count[current_class] == opt.bufferSize then
+    nb_of_buffers = nb_of_buffers + 1
+    to_save.intervals.samples_per_class[to_save.interval_idx][nb_of_buffers] = buffer_count
     print('Collected enough data. Samples distribution by class: '); print(buffer_count:reshape(1,10)) 
     buffer = complete_buffer(buffer, buffer_count, GAN, feature_extractor, opt)
     buffer_temp = {}
