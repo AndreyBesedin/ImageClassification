@@ -461,7 +461,7 @@ config = {
 ---------------------------------------------------------------------------------------------------------
 
 print('\nLOADING THE TESTSET')
-path_to_testset = './datasets/MNIST/t7testset.t7'
+path_to_testset = './datasets/MNIST/t7/testset.t7'
 testset = torch.load(path_to_testset)
 print('\nTESTSET LOADED, SIZE: ' .. testset.data:size(1)); 
 path_to_trainset = './datasets/MNIST/t7/trainset.t7'
