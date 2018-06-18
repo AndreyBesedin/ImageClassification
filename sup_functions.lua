@@ -370,9 +370,9 @@ function test_classifier(C_model, data)
   local confusion = optim.ConfusionMatrix(opt.nb_classes)
   confusion:zero()
   for idx = 1, data.data:size(1), opt.batchSize do
-    --xlua.progress(idx, opt.testSize)
-    indices = torch.range(idx, math.min(idx + opt.batchSize, data.data:size(1)))
-    local batch = getBatch(testset, indices:long())
+    xlua.progress(idx, data.data:size(1))
+    indices = torch.range(idx, math.min(idx + opt.batchSize-1, data.data:size(1)))
+    local batch = getBatch(data, indices:long())
     local y = C_model:forward(batch.data:cuda())
     y = y:float()
     _, y_max = y:max(2)
@@ -381,3 +381,69 @@ function test_classifier(C_model, data)
   confusion:updateValids()
   return confusion  
 end
+
+function generate_subset_from_pretrained_model(batch_number, batch_size, generative_model, feature_extractor)
+  local data_size = batch_number * batch_size
+  local generated_data = torch.FloatTensor(data_size, 2048);
+  for batch_idx = 1, batch_number do
+    xlua.progress(batch_idx, batch_number)
+    local input_noise = torch.FloatTensor(batch_size, 100, 1, 1)
+    input_noise = input_noise:normal(0, 1);
+    local generated_images = generative_model:forward(input_noise:cuda())
+    local generated_images_big = rescale_3D_batch(generated_images, 224)
+    local data_features = feature_extractor:forward(generated_images_big)
+    generated_data[{{1 + (batch_idx-1)*batch_size, batch_idx * batch_size},{}}] = data_features:float()
+  end
+  return generated_data
+end
+
+function generate_data_from_set_of_models()
+  local models_folder = '/home/besedin/workspace/Models/LSUN_DCGAN_generators/full_dataset_with_classification/best_models/'
+  local save_to = '/home/besedin/workspace/Projects/Stream_image_classification/subsets/LSUN/100k_images_10_classes/'
+  local data_classes = {'bedroom', 'bridge', 'church_outdoor', 'classroom', 'conference_room', 
+                      'dining_room', 'kitchen', 'living_room', 'restaurant', 'tower'}    
+  local feature_extractor = init_feature_extractor('/home/besedin/workspace/Projects/Stream_image_classification/models/feature_extractors/resnet-200.t7')
+  for idx_class = 1, #data_classes do
+    local generative_model = torch.load(models_folder .. data_classes[idx_class] .. '_G.t7')
+    print('Generating the ' .. data_classes[idx_class] .. ' dataset')
+    local generated_data_class = generate_subset_from_pretrained_model(10000, 10, generative_model, feature_extractor)
+    torch.save(save_to .. data_classes[idx_class] .. '_gen.t7', generated_data_class)
+  end
+  return 0
+end
+
+function make_original_data_subsets()
+  local feature_extractor = init_feature_extractor('/home/besedin/workspace/Projects/Stream_image_classification/models/feature_extractors/resnet-200.t7')
+  local save_to = '/home/besedin/workspace/Projects/Stream_image_classification/subsets/LSUN/100k_images_10_classes/' 
+  local data_classes = {'bedroom', 'bridge', 'church_outdoor', 'classroom', 'conference_room', 
+                      'dining_room', 'kitchen', 'living_room', 'restaurant', 'tower'}
+  opt = {
+    data_folder = '/home/besedin/workspace/Data/LSUN/data_lmdb',
+    nThreads = 6,
+    imSize = 224,
+    batchSize = 10,
+    loadSize = 256,
+    fineSize = 224,
+    gpu = 1,
+    full_data_classes = data_classes,
+  }
+  batch_number = 500
+  batch_size = opt.batchSize
+  local data_size = batch_number * batch_size
+  local data_loaders = initialize_loaders(opt)
+  for idx_class = 1, #data_classes do
+    local real_data_class = torch.FloatTensor(data_size, 2048);
+    print('Creating the ' .. data_classes[idx_class] .. ' subset')
+    for batch_idx = 1, batch_number do
+      xlua.progress(batch_idx, batch_number)
+      local real_images = data_loaders[idx_class]:getBatch(10)
+      local data_features = feature_extractor:forward(real_images:cuda())
+      real_data_class[{{1 + (batch_idx-1)*batch_size, batch_idx * batch_size},{}}] = data_features:float()
+    end
+    torch.save(save_to .. data_classes[idx_class] .. '_test_real.t7', real_data_class)
+  end
+  return 0
+end
+    
+    
+    
